@@ -1,0 +1,17 @@
+node_modules/
+.next/
+dist/
+target/
+test-ledger/
+.anchor/
+.env
+.env.local
+keys/*
+!keys/.gitkeep
+data/*
+!data/.gitkeep
+*.log
+.DS_Store
+.venv/
+__pycache__/
+.env.localnet

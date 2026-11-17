@@ -1,0 +1,1156 @@
+{
+ "description": "Real SOL ladder (Gemini SOL2611202200) with a calm-week forecast: market center, belief sd $3, confidence 0.5, $100. Reference computed by scripts/fixtures/reference.py (SciPy SLSQP), before post-processing.",
+ "capturedAt": "2026-11-17T16:07:01.210859+00:00",
+ "event": {
+  "id": "455989",
+  "title": "SOL price on November 20",
+  "slug": "sol-price-on-november-20",
+  "type": "categorical",
+  "category": "Crypto",
+  "ticker": "SOL2611202200",
+  "status": "active",
+  "createdAt": "2026-11-13T10:26:43.022Z",
+  "contracts": [
+   {
+    "id": "455989-1152221",
+    "label": "$65 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $65 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.99",
+      "no": "0.11"
+     },
+     "sell": {
+      "yes": "0.89",
+      "no": "0.01"
+     },
+     "bestBid": "0.89",
+     "bestAsk": "0.99"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI65",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI65",
+    "marketState": "open",
+    "abbreviatedName": ">$65",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 19,
+    "strike": {
+     "type": "above",
+     "value": "65"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1151882",
+    "label": "$66 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $66 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.93",
+      "no": "0.11"
+     },
+     "sell": {
+      "yes": "0.89",
+      "no": "0.07"
+     },
+     "bestBid": "0.89",
+     "bestAsk": "0.93",
+     "lastTradePrice": "0.83"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI66",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI66",
+    "marketState": "open",
+    "abbreviatedName": ">$66",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 18,
+    "strike": {
+     "type": "above",
+     "value": "66"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1149266",
+    "label": "$67 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $67 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.9",
+      "no": "0.14"
+     },
+     "sell": {
+      "yes": "0.86",
+      "no": "0.1"
+     },
+     "bestBid": "0.86",
+     "bestAsk": "0.9",
+     "lastTradePrice": "0.81"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI67",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI67",
+    "marketState": "open",
+    "abbreviatedName": ">$67",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 17,
+    "strike": {
+     "type": "above",
+     "value": "67"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1149095",
+    "label": "$68 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $68 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.88",
+      "no": "0.22"
+     },
+     "sell": {
+      "yes": "0.78",
+      "no": "0.12"
+     },
+     "bestBid": "0.78",
+     "bestAsk": "0.88",
+     "lastTradePrice": "0.63"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI68",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI68",
+    "marketState": "open",
+    "abbreviatedName": ">$68",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 16,
+    "strike": {
+     "type": "above",
+     "value": "68"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1148502",
+    "label": "$69 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $69 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.82",
+      "no": "0.28"
+     },
+     "sell": {
+      "yes": "0.72",
+      "no": "0.18"
+     },
+     "bestBid": "0.72",
+     "bestAsk": "0.82",
+     "lastTradePrice": "0.78"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI69",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI69",
+    "marketState": "open",
+    "abbreviatedName": ">$69",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 15,
+    "strike": {
+     "type": "above",
+     "value": "69"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1145817",
+    "label": "$70 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $70 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.81",
+      "no": "0.39"
+     },
+     "sell": {
+      "yes": "0.61",
+      "no": "0.19"
+     },
+     "bestBid": "0.61",
+     "bestAsk": "0.81",
+     "lastTradePrice": "0.42"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI70",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI70",
+    "marketState": "open",
+    "abbreviatedName": ">$70",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 14,
+    "strike": {
+     "type": "above",
+     "value": "70"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1145002",
+    "label": "$71 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $71 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.73",
+      "no": "0.46"
+     },
+     "sell": {
+      "yes": "0.54",
+      "no": "0.27"
+     },
+     "bestBid": "0.54",
+     "bestAsk": "0.73",
+     "lastTradePrice": "0.52"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI71",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI71",
+    "marketState": "open",
+    "abbreviatedName": ">$71",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 13,
+    "strike": {
+     "type": "above",
+     "value": "71"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1144557",
+    "label": "$72 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $72 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.59",
+      "no": "0.51"
+     },
+     "sell": {
+      "yes": "0.49",
+      "no": "0.41"
+     },
+     "bestBid": "0.49",
+     "bestAsk": "0.59",
+     "lastTradePrice": "0.45"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI72",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI72",
+    "marketState": "open",
+    "abbreviatedName": ">$72",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 12,
+    "strike": {
+     "type": "above",
+     "value": "72"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1138235",
+    "label": "$73 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $73 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.5",
+      "no": "0.6"
+     },
+     "sell": {
+      "yes": "0.4",
+      "no": "0.5"
+     },
+     "bestBid": "0.4",
+     "bestAsk": "0.5",
+     "lastTradePrice": "0.39"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI73",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI73",
+    "marketState": "open",
+    "abbreviatedName": ">$73",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 11,
+    "strike": {
+     "type": "above",
+     "value": "73"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1137952",
+    "label": "$74 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $74 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.46",
+      "no": "0.72"
+     },
+     "sell": {
+      "yes": "0.28",
+      "no": "0.54"
+     },
+     "bestBid": "0.28",
+     "bestAsk": "0.46",
+     "lastTradePrice": "0.33"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI74",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI74",
+    "marketState": "open",
+    "abbreviatedName": ">$74",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 10,
+    "strike": {
+     "type": "above",
+     "value": "74"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1135296",
+    "label": "$75 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $75 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.34",
+      "no": "0.76"
+     },
+     "sell": {
+      "yes": "0.24",
+      "no": "0.66"
+     },
+     "bestBid": "0.24",
+     "bestAsk": "0.34",
+     "lastTradePrice": "0.27"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI75",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI75",
+    "marketState": "open",
+    "abbreviatedName": ">$75",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 9,
+    "strike": {
+     "type": "above",
+     "value": "75"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1128288",
+    "label": "$76 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $76 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.3",
+      "no": "0.88"
+     },
+     "sell": {
+      "yes": "0.12",
+      "no": "0.7"
+     },
+     "bestBid": "0.12",
+     "bestAsk": "0.3",
+     "lastTradePrice": "0.16"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI76",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI76",
+    "marketState": "open",
+    "abbreviatedName": ">$76",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 0,
+    "strike": {
+     "type": "above",
+     "value": "76"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1128290",
+    "label": "$77 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $77 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.19",
+      "no": "0.85"
+     },
+     "sell": {
+      "yes": "0.15",
+      "no": "0.81"
+     },
+     "bestBid": "0.15",
+     "bestAsk": "0.19",
+     "lastTradePrice": "0.15"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI77",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI77",
+    "marketState": "open",
+    "abbreviatedName": ">$77",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 1,
+    "strike": {
+     "type": "above",
+     "value": "77"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1128291",
+    "label": "$78 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $78 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.18",
+      "no": "0.92"
+     },
+     "sell": {
+      "yes": "0.08",
+      "no": "0.82"
+     },
+     "bestBid": "0.08",
+     "bestAsk": "0.18"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI78",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI78",
+    "marketState": "open",
+    "abbreviatedName": ">$78",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 2,
+    "strike": {
+     "type": "above",
+     "value": "78"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1128293",
+    "label": "$79 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $79 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.15",
+      "no": "0.95"
+     },
+     "sell": {
+      "yes": "0.05",
+      "no": "0.85"
+     },
+     "bestBid": "0.05",
+     "bestAsk": "0.15",
+     "lastTradePrice": "0.6"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI79",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI79",
+    "marketState": "open",
+    "abbreviatedName": ">$79",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 3,
+    "strike": {
+     "type": "above",
+     "value": "79"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1128294",
+    "label": "$80 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $80 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.11",
+      "no": "0.94"
+     },
+     "sell": {
+      "yes": "0.06",
+      "no": "0.89"
+     },
+     "bestBid": "0.06",
+     "bestAsk": "0.11",
+     "lastTradePrice": "0.11"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI80",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI80",
+    "marketState": "open",
+    "abbreviatedName": ">$80",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 4,
+    "strike": {
+     "type": "above",
+     "value": "80"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1128295",
+    "label": "$81 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $81 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.1",
+      "no": "0.99"
+     },
+     "sell": {
+      "yes": "0.01",
+      "no": "0.9"
+     },
+     "bestBid": "0.01",
+     "bestAsk": "0.1"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI81",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI81",
+    "marketState": "open",
+    "abbreviatedName": ">$81",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 5,
+    "strike": {
+     "type": "above",
+     "value": "81"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1128298",
+    "label": "$83 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $83 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.08",
+      "no": "0.99"
+     },
+     "sell": {
+      "yes": "0.01",
+      "no": "0.92"
+     },
+     "bestBid": "0.01",
+     "bestAsk": "0.08",
+     "lastTradePrice": "0.23"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI83",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI83",
+    "marketState": "open",
+    "abbreviatedName": ">$83",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 7,
+    "strike": {
+     "type": "above",
+     "value": "83"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1128297",
+    "label": "$82 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $82 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.06",
+      "no": "0.98"
+     },
+     "sell": {
+      "yes": "0.02",
+      "no": "0.94"
+     },
+     "bestBid": "0.02",
+     "bestAsk": "0.06",
+     "lastTradePrice": "0.16"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI82",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI82",
+    "marketState": "open",
+    "abbreviatedName": ">$82",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 6,
+    "strike": {
+     "type": "above",
+     "value": "82"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   },
+   {
+    "id": "455989-1129524",
+    "label": "$84 or above",
+    "description": {
+     "data": {},
+     "content": [
+      {
+       "data": {},
+       "marks": [],
+       "value": "If the price of Solana (SOL) is $84 or above on November 20, 2026 at 5pm ET, this market will resolve to Yes. Otherwise, it will resolve to No. If no eligible trade occurs during the contract window, this contract will resolve based on the most recent traded price prior. Outcome verified against the LS-LRRR-SOLNUSD index. View the [full rules](https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf).",
+       "nodeType": "text"
+      }
+     ],
+     "nodeType": "document"
+    },
+    "prices": {
+     "buy": {
+      "yes": "0.05"
+     },
+     "sell": {
+      "no": "0.95"
+     },
+     "bestAsk": "0.05"
+    },
+    "status": "active",
+    "createdAt": "2026-11-13T10:26:43.022Z",
+    "termsAndConditionsUrl": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+    "ticker": "HI84",
+    "instrumentSymbol": "GEMI-SOL2611202200-HI84",
+    "marketState": "open",
+    "abbreviatedName": ">$84",
+    "color": "#4CAF50",
+    "expiryDate": "2026-11-20T22:00:00.000Z",
+    "effectiveDate": "2026-11-13T10:30:00.000Z",
+    "sortOrder": 8,
+    "strike": {
+     "type": "above",
+     "value": "84"
+    },
+    "source": "LS-LRRR-SOLNUSD",
+    "isCombo": false,
+    "quantityIncrement": "0.01",
+    "quantityMinimum": "0.01",
+    "priceIncrement": "0.01",
+    "quoteAssetPrecision": 2,
+    "priceMinimum": "0.01"
+   }
+  ],
+  "effectiveDate": "2026-11-13T10:26:43.022Z",
+  "isLive": false,
+  "participants": [],
+  "description": "Interval SOL price prediction event expiring on November 20, 2026 at 5pm ET",
+  "imageUrl": "https://assets.gemini.com/predictions/images/sol_0e1cf18e-eff3-4570-a348-210cd5434e8f.avif",
+  "series": "SOL1H",
+  "volume": "1869.87",
+  "volume24h": "180",
+  "tags": [
+   "Solana"
+  ],
+  "expiryDate": "2026-11-20T22:00:00.000Z",
+  "startTime": "2026-11-13T10:30:00.000Z",
+  "termsLink": "https://assets.gemini.com/predictions/terms_and_conditions/sol_9cceb1a1-4177-401a-82dc-097ad2676bc2.pdf",
+  "subcategory": {
+   "id": 35,
+   "slug": "crypto_solana",
+   "name": "Solana",
+   "path": [
+    "Crypto",
+    "Solana"
+   ]
+  },
+  "socialImageUrl": "https://assets.gemini.com/predictions/images/sol_9af62db6-2bf3-49e8-b401-4e7e93eeb520.png",
+  "featuredImageUrl": "https://assets.gemini.com/predictions/images/Top_10_-_SOL_1_02efc6d8-46a5-417e-9173-893daf5ca59e.avif",
+  "template": "prices-ladder",
+  "eventTags": [
+   {
+    "id": 18,
+    "name": "Reference",
+    "slug": "reference"
+   }
+  ],
+  "source": "LS-LRRR-SOLNUSD",
+  "sourceDetails": {
+   "agency": "lukka",
+   "index": "LS-LRRR-SOLNUSD"
+  },
+  "volumeDelta24hPct": "-42.86"
+ },
+ "inputs": {
+  "beliefMean": 72.71556886227545,
+  "beliefSd": 3.0,
+  "belief": [
+   0.005057664991283049,
+   0.007535625388500823,
+   0.01578398198858201,
+   0.029613768304015707,
+   0.04976839249894818,
+   0.07492019712634429,
+   0.10102563004925955,
+   0.12202619027022417,
+   0.13202746942175536,
+   0.1279574856548244,
+   0.11108542804153282,
+   0.08638489013336337,
+   0.06017367489596702,
+   0.03754581797994008,
+   0.0209845951533379,
+   0.010505598616990451,
+   0.004711062848103505,
+   0.0018923048510880685,
+   0.000680821384770848,
+   0.0002194019554979242,
+   9.999844567040055e-05
+  ],
+  "confidence": 0.5,
+  "stakeUsd": 100.0
+ },
+ "reference": {
+  "solver": "scipy SLSQP nit=10000; KKT max g = 1.000000000129",
+  "marketProb": [
+   0.05988023952095814,
+   0.02994011976047896,
+   0.02994011976047907,
+   0.049900199600798334,
+   0.05988023952095814,
+   0.05988023952095814,
+   0.07485029940119756,
+   0.09481037924151695,
+   0.08982035928143715,
+   0.07984031936127746,
+   0.0798403193612774,
+   0.07984031936127749,
+   0.03992015968063873,
+   0.0399201596806387,
+   0.029940119760479042,
+   0.014970059880239535,
+   0.029940119760479035,
+   0.014970059880239521,
+   0.000998003992015968,
+   0.000998003992015968,
+   0.03992015968063872
+  ],
+  "marketMean": 72.71556886227545,
+  "marketSd": 4.8096954980726325,
+  "payoutByBucket": [
+   73.15260691176589,
+   73.1526069117658,
+   76.20683619744533,
+   106.90439737662341,
+   106.90439737662341,
+   106.90439737662341,
+   106.90439737662341,
+   106.90439737662341,
+   106.90439737662341,
+   106.90439737662341,
+   106.90439737662341,
+   106.90439737662338,
+   106.90439737662341,
+   85.48130607939733,
+   85.48130607939736,
+   85.48130607939738,
+   78.69161417732839,
+   78.69161417732845,
+   78.6916141773285,
+   78.69161417732859,
+   78.69161417732859
+  ],
+  "expectedLogGrowth": 0.007927407931139049,
+  "weights": {
+   "cash": 0.44939823712470334,
+   "YES>=66": 0.028404332356820095,
+   "YES>=67": 0.27627805061260297,
+   "NO>=77": 0.18209627602642162,
+   "NO>=80": 0.06382310387944916
+  }
+ }
+}

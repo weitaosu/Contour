@@ -1,0 +1,15 @@
+import { fromMarket, normalizeEvent } from "@contour/core";
+const base = "http://localhost:4000";
+const { ladder } = await (await fetch(`${base}/markets/SOL2611202200`)).json();
+const belief = fromMarket(ladder, 0, 0.6);
+const t0 = Date.now();
+const res = await fetch(`${base}/quote`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ticker: "SOL2611202200", belief, confidence: 0.5, stakeUsd: 100 }) });
+const q = await res.json();
+console.log("status", res.status, "ms", Date.now() - t0);
+console.log({ hash: q.forecastHash, expiryTs: q.expiryTs, advice: q.quote.advice, cash: q.quote.cashUsd, min: q.quote.minPayout, max: q.quote.maxPayout, pYou: q.quote.probProfitBelief, pMkt: q.quote.probProfitMarket, evMkt: q.quote.evUnderMarket, absorb: q.quote.maxAbsorbableStakeUsd, iters: q.quote.iterations });
+console.log(q.quote.legs.map((l: any) => `${l.side.toUpperCase()} ${l.label} @${l.price} x${l.qty} = $${l.usd}${l.capped ? " (capped)" : ""}`));
+console.log("schedule", q.scheduleBaseUnits.join(" "));
+console.log("comparison", q.quote.comparison);
+import { compile } from "@contour/core";
+const raw = compile({ ladder, belief, confidence: 0.5, stakeUsd: 100 });
+console.log("no-depth legs:", raw.legs.map((l) => `${l.side} ${l.label} $${l.usd}`), "cash", raw.cashUsd, "payouts", raw.payoutByBucket.map((x) => x.toFixed(0)).join(" "));
