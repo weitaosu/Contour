@@ -34,8 +34,8 @@ export function ReplayChart({ points, height = 280 }: { points: { contour: numbe
               </text>
             </g>
           ))}
-          <path d={mk("s")} fill="none" stroke={COLORS.ink} strokeWidth={1.75} />
-          <path d={mk("c")} fill="none" stroke={COLORS.violet} strokeWidth={2.5} />
+          <path key={`s${points.length}`} d={mk("s")} pathLength={1} className="draw" fill="none" stroke={COLORS.ink} strokeWidth={1.75} />
+          <path key={`c${points.length}`} d={mk("c")} pathLength={1} className="draw" style={{ animationDelay: "150ms" }} fill="none" stroke={COLORS.violet} strokeWidth={2.5} />
           <text x={w - m.r} y={height - 6} textAnchor="end" fontSize={13} fill={COLORS.smoke}>
             settled ladders, in expiry order →
           </text>

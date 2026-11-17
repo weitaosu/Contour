@@ -1,5 +1,8 @@
 import {
   compile,
+  formatValue,
+  fromMarket,
+  marketMoments,
   forecastHash,
   marketIdHex,
   tryNormalize,
@@ -25,6 +28,20 @@ export interface MarketSummary {
   volume: number | null;
   marketProb: number[];
   cutLabels: string[];
+  bucketLabels: string[];
+  /** Readout: implied center and spread for ordered ladders; the leader for named outcomes. */
+  readout: { center: string | null; spread: string | null; leader: string | null; leaderProb: number | null };
+  /** What a calmer view (market center, 0.6x width, confidence 0.5, $100) would get, from the real compiler. */
+  teaser: {
+    belief: number[];
+    worst: number;
+    best: number;
+    probProfitYou: number;
+    payouts: number[];
+    trade: boolean;
+    /** Races only: the example "this candidate is underrated" view. */
+    focus?: { label: string; marketProb: number; yourProb: number; paysIfWins: number };
+  } | null;
 }
 
 export class MarketService {
@@ -55,7 +72,44 @@ export class MarketService {
       }
       const l = r.ladder;
       this.events.set(e.ticker, { at: Date.now(), event: e });
+      let readout: MarketSummary["readout"] = { center: null, spread: null, leader: null, leaderProb: null };
+      let teaser: MarketSummary["teaser"] = null;
+      try {
+        if (l.cuts) {
+          const mm = marketMoments(l);
+          const r = (v: number) => (Math.abs(v) >= 1000 ? Math.round(v) : Math.round(v * 100) / 100);
+          readout = { center: formatValue(r(mm.mean), l.unit), spread: formatValue(r(mm.sd), l.unit), leader: null, leaderProb: null };
+          const belief = fromMarket(l, 0, 0.6);
+          const q = compile({ ladder: l, belief, confidence: 0.5, stakeUsd: 100, maxIter: 8_000 });
+          teaser = { belief, worst: q.minPayout, best: q.maxPayout, probProfitYou: q.probProfitBelief, payouts: q.payoutByBucket, trade: q.advice === "trade" };
+        } else {
+          const order = l.marketProb.map((p, i) => [p, i] as const).sort((a, b) => b[0] - a[0]);
+          const j = order[0][1];
+          readout = { center: null, spread: null, leader: l.bucketLabels[j], leaderProb: l.marketProb[j] };
+          // Example view: the runner-up is underrated by 10 points; everyone else scales down.
+          const k = order[1][1];
+          const boost = 0.1;
+          const belief = l.marketProb.map((p, i) => (i === k ? p + boost : p * (1 - (p === 1 ? 0 : boost / (1 - l.marketProb[k])))));
+          const sum = belief.reduce((a, b) => a + b, 0);
+          const b = belief.map((x) => Math.max(1e-4, x / sum));
+          const q = compile({ ladder: l, belief: b, confidence: 1, stakeUsd: 100, maxIter: 8_000 });
+          teaser = {
+            belief: b,
+            worst: q.minPayout,
+            best: q.maxPayout,
+            probProfitYou: q.probProfitBelief,
+            payouts: q.payoutByBucket,
+            trade: q.advice === "trade",
+            focus: { label: l.bucketLabels[k], marketProb: l.marketProb[k], yourProb: b[k], paysIfWins: q.payoutByBucket[k] },
+          };
+        }
+      } catch {
+        // teaser is optional
+      }
       markets.push({
+        readout,
+        teaser,
+        bucketLabels: l.bucketLabels,
         ticker: l.eventTicker,
         title: l.title,
         category: l.category,

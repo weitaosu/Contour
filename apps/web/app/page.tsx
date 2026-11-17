@@ -6,9 +6,9 @@ import { useQuery } from "@tanstack/react-query";
 import { compile, fromMarket, marketMoments, type Ladder } from "@contour/core";
 
 const VIEWS = [
-  { label: "A calmer week", shift: 0, scale: 0.6 },
+  { label: "A tighter view", shift: 0, scale: 0.6 },
   { label: "A bullish view", shift: 0.6, scale: 0.8 },
-  { label: "A calmer week", shift: 0, scale: 0.6 },
+  { label: "A tighter view", shift: 0, scale: 0.6 },
   { label: "A bearish view", shift: -0.6, scale: 0.8 },
 ];
 import { LineChart, Lock, SlidersHorizontal, Search } from "lucide-react";
@@ -110,6 +110,56 @@ function HeroMockup({ ticker }: { ticker: string }) {
   );
 }
 
+const SUBTITLE: Record<string, string> = {
+  Crypto: "Where will the price land? Each ladder is one price at a set time.",
+  Commodities: "Where will gold, oil, gas, silver or copper close?",
+  Weather: "How hot will it get? Each outcome is a temperature range.",
+  Politics: "Who will win? Races where exactly one candidate can win.",
+  Economics: "Where will the number land?",
+};
+
+function WhatYouCanTrade() {
+  const kinds = [
+    {
+      q: "Where will a number land?",
+      ex: "SOL on Nov 20, gold, oil",
+      how: "Gemini lists one yes/no contract per strike (“SOL ≥ $70”, “≥ $71”…). Contour reads them as one curve, so you can say “around $73, give or take $3”.",
+    },
+    {
+      q: "Which range will it fall in?",
+      ex: "Daily high temperature",
+      how: "Each contract is one range (“58–59°F”). Exactly one range happens, so your view is a probability for each.",
+    },
+    {
+      q: "Who will win?",
+      ex: "2028 Democratic and Republican nominees",
+      how: "Each contract is one candidate and exactly one can win. Give each candidate your own odds; Contour buys more of the ones you rate above the market.",
+    },
+  ];
+  return (
+    <div className="mt-8 rounded-[36px] border border-mist p-6 md:p-8">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="card-title">What you can trade</p>
+        <p className="text-[14px] text-slate">Any Gemini market where outcomes form a set and exactly one of them happens.</p>
+      </div>
+      <div className="mt-6 grid gap-6 md:grid-cols-3">
+        {kinds.map((k, i) => (
+          <div key={k.q} className="flex flex-col gap-2">
+            <span className="flex h-8 w-8 items-center justify-center rounded-full bg-signal-violet text-[14px] font-bold text-porcelain">{i + 1}</span>
+            <p className="font-bold text-inkstone">{k.q}</p>
+            <p className="text-[14px] text-smoke">e.g. {k.ex}</p>
+            <p className="text-[14px] text-slate">{k.how}</p>
+          </div>
+        ))}
+      </div>
+      <p className="mt-6 border-t border-mist pt-5 text-[14px] text-slate">
+        <b className="text-inkstone">Not covered, on purpose:</b> single yes/no questions (one contract is already the whole view), markets where several outcomes can
+        come true at once (“which leaders will leave office in 2026?”), point spreads and player props. For those, the payout schedule could not be guaranteed.
+      </p>
+    </div>
+  );
+}
+
 const FAQ: [string, string][] = [
   ["Why not just buy one contract?", "One contract pays only if the outcome lands past one strike. A Contour position pays across the whole range you believe in, with a floor you can see before you sign. On the SOL calm-week example it profits anywhere from $67 to $77 and cannot lose more than $37."],
   ["More legs means more spread paid.", "Yes. The solver optimizes at ask prices, so costs are inside the answer, and the screen shows the expected return if the market is right. When costs exceed your edge it holds cash and tells you there is no trade."],
@@ -170,7 +220,8 @@ export default function Home() {
             <input className="input !rounded-full !pl-12" placeholder="Search SOL, gold, Austin…" value={search} onChange={(e) => setSearch(e.target.value)} aria-label="Search markets" />
           </label>
         </div>
-        <div className="mt-6 flex flex-wrap gap-2">
+        <WhatYouCanTrade />
+        <div className="mt-8 flex flex-wrap gap-2">
           <button className={`tag ${cat === null ? "tag-active" : ""}`} onClick={() => setCat(null)}>All</button>
           {cats.map((c) => (
             <button key={c} className={`tag ${cat === c ? "tag-active" : ""}`} onClick={() => setCat(c)}>
@@ -186,7 +237,10 @@ export default function Home() {
         )}
         {groups.map(([c, ms]) => (
           <div key={c} className="mt-12">
-            <h3 className="eyebrow !text-inkstone">{c}</h3>
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h3 className="eyebrow !text-inkstone">{c}</h3>
+              {SUBTITLE[c] && <span className="text-[14px] text-slate">{SUBTITLE[c]}</span>}
+            </div>
             <div className="mt-4 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {ms.map((m) => <MarketCard key={m.ticker} m={m} />)}
             </div>

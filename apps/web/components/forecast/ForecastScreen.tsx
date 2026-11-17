@@ -11,6 +11,7 @@ import {
   fromBars,
   isTradable,
   likelyRange,
+  paysIn,
   marketMoments,
   normalBelief,
   type Ladder,
@@ -27,6 +28,7 @@ import { WalletDialog } from "@/components/WalletButton";
 import { FiveNumbers } from "./FiveNumbers";
 import { ComparisonCard } from "./ComparisonCard";
 import { LegsPanel } from "./LegsPanel";
+import { CandidateEditor } from "./CandidateEditor";
 
 type ShownQuote = Omit<Quote, "raw"> & { iterations?: number };
 
@@ -127,6 +129,18 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
   const shown: ShownQuote = serverFresh ? serverFresh.data.quote : preview;
   const noEdge = shown.advice === "no_edge";
 
+  // What the single best contract for the same view would pay in each outcome, for the overlay.
+  const compare = useMemo(() => {
+    const c = shown.comparison;
+    if (!c) return null;
+    const i = ladder.instruments.findIndex((x) => x.symbol === c.symbol);
+    if (i < 0) return null;
+    return ladder.marketProb.map((_, j) => (paysIn(ladder, i, c.side, j) ? c.payoutIfWin : 0));
+  }, [shown.comparison, ladder]);
+  const coveredContour = shown.payoutByBucket.filter((p) => p > 0.005).length;
+  const profitContour = shown.payoutByBucket.filter((p) => p > stake + 1e-9).length;
+  const coveredSingle = compare ? compare.filter((p) => p > 0).length : 0;
+
   // Chart decorations.
   const untraded = ladder.kind === "threshold" ? ladder.instruments.map((_, i) => i).filter((i) => !isTradable(ladder, i)).map((i) => ({ cut: i, reason: ladder.crossed[i] ? "quotes crossed" : "no two-sided quote" })) : [];
   const likely = useMemo(() => {
@@ -156,6 +170,12 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
             {ladder.category} · Settles {settleLabel(ladder.expiry)} · {untilLabel(ladder.expiry, now)}
           </p>
           <h1 className="title mt-2">{ladder.title}</h1>
+          {!ordered && (
+            <p className="mt-3 max-w-2xl text-slate">
+              One candidate wins. Contour buys more of the candidates you rate above the market and less of the rest, so you get paid in proportion to how right
+              you were instead of betting everything on one name.
+            </p>
+          )}
         </div>
         <div className="flex flex-wrap gap-2">
           <span className="tag tnum">{ladder.kind === "threshold" ? `${ladder.strikes.length} strikes` : `${ladder.marketProb.length} outcomes`}</span>
@@ -168,7 +188,7 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
         <div className="flex min-w-0 flex-col gap-6">
           <section className="card">
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="card-title">Probability by outcome</h2>
+              <h2 className="card-title">{ordered ? "Probability by outcome" : "Chance of winning, by candidate"}</h2>
               <div className="flex items-center gap-5 text-[14px] text-slate">
                 <span className="inline-flex items-center gap-2">
                   <span className="h-3 w-3 rounded-[3px] bg-mist ring-1 ring-smoke" /> Market
@@ -227,13 +247,41 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
               />
             </div>
             <div className="mt-6 border-t border-mist pt-6">
-              <div className="mb-2 flex items-center justify-between">
+              <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
                 <h2 className="card-title">Payout per outcome</h2>
-                <span className="text-[14px] text-slate">{serverFresh ? "Desk quote" : "Preview"}</span>
+                <div className="flex items-center gap-4 text-[14px] text-slate">
+                  <span className="inline-flex items-center gap-2">
+                    <span className="h-3 w-3 rounded-[3px] bg-signal-violet" /> Contour position
+                  </span>
+                  {compare && (
+                    <span className="inline-flex items-center gap-2">
+                      <span className="h-3 w-1.5 rounded-[2px] bg-smoke" /> One contract, same ${stake.toLocaleString("en-US")}
+                    </span>
+                  )}
+                  <span className="text-smoke">· {serverFresh ? "desk quote" : "preview"}</span>
+                </div>
               </div>
-              <PayoutChart payouts={shown.payoutByBucket} stake={stake} hover={hover} onHover={setHover} bucketLabels={ladder.bucketLabels} />
+              {compare && !noEdge && (
+                <p className="mb-2 text-[14px] text-slate">
+                  Contour pays back something in <b className="tnum text-signal-violet">{coveredContour} of {ladder.marketProb.length}</b> outcomes and
+                  profits in <b className="tnum text-signal-violet">{profitContour}</b>. The single best contract pays in{" "}
+                  <b className="tnum text-inkstone">{coveredSingle}</b> and loses everything in the other {ladder.marketProb.length - coveredSingle}.
+                </p>
+              )}
+              <PayoutChart payouts={shown.payoutByBucket} stake={stake} hover={hover} onHover={setHover} bucketLabels={ladder.bucketLabels} compare={noEdge ? null : compare} />
             </div>
           </section>
+
+          {!ordered && (
+            <CandidateEditor
+              labels={ladder.bucketLabels}
+              market={ladder.marketProb}
+              belief={belief}
+              payouts={shown.payoutByBucket}
+              stake={stake}
+              onChange={(b) => setBars(b)}
+            />
+          )}
 
           <FiveNumbers quote={shown} stake={stake} />
 
@@ -246,7 +294,9 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
         <aside id="controls" className="card flex min-w-0 flex-col gap-7 lg:sticky lg:top-[96px]">
           <div>
             <p className="eyebrow">Your forecast</p>
-            <p className="mt-1 text-slate">{ordered ? "Where do you think it lands, and how sure are you?" : "Set a probability for each outcome."}</p>
+            <p className="mt-1 text-slate">
+              {ordered ? "Where do you think it lands, and how sure are you? Drag the curve or use the sliders." : "Set your odds in the candidate list, or drag the violet bars on the chart."}
+            </p>
           </div>
           {ordered && (
             <>

@@ -4,7 +4,7 @@ import { scaleLinear } from "d3-scale";
 import { useMemo } from "react";
 import { bandScale, COLORS, MARGIN, niceMax } from "./common";
 import { useSize } from "./useSize";
-import { useTweenedArray, useTweenedNumber } from "./useTween";
+import { useStaggeredArray, useTweenedNumber } from "./useTween";
 
 export interface PayoutChartProps {
   payouts: number[];
@@ -15,6 +15,8 @@ export interface PayoutChartProps {
   outcomeLabel?: string;
   height?: number;
   bucketLabels: string[];
+  /** Payout per outcome of the single best contract for the same stake (drawn over the bars, grey). */
+  compare?: number[] | null;
 }
 
 function topRounded(x: number, y: number, w: number, h: number, r: number) {
@@ -22,12 +24,15 @@ function topRounded(x: number, y: number, w: number, h: number, r: number) {
   return `M${x},${y + h} L${x},${y + rr} Q${x},${y} ${x + rr},${y} L${x + w - rr},${y} Q${x + w},${y} ${x + w},${y + rr} L${x + w},${y + h} Z`;
 }
 
-export function PayoutChart({ payouts: target, stake, hover, onHover, outcome, outcomeLabel, height = 230, bucketLabels }: PayoutChartProps) {
+export function PayoutChart({ payouts: target, stake, hover, onHover, outcome, outcomeLabel, height = 230, bucketLabels, compare }: PayoutChartProps) {
   const { ref, width: measured } = useSize<HTMLDivElement>();
   const width = measured || 600;
-  const payouts = useTweenedArray(target, 0.22);
+  // Bars move as a left-to-right wave whenever the payouts change.
+  const payouts = useStaggeredArray(target, 520, Math.max(12, Math.min(40, 600 / Math.max(1, target.length))));
   const n = payouts.length;
-  const top = 34;
+  const compareTarget = useMemo(() => compare ?? target.map(() => 0), [compare, target]);
+  const compareVals = useStaggeredArray(compareTarget, 520, Math.max(12, Math.min(40, 600 / Math.max(1, target.length))));
+  const top = compare ? 44 : 34;
   const bottom = 16;
   const x = useMemo(() => bandScale(n, width, 0.2), [n, width]);
   const yMaxTarget = niceMax(Math.max(stake, ...target) * 1.12);
@@ -67,12 +72,44 @@ export function PayoutChart({ payouts: target, stake, hover, onHover, outcome, o
             const h = Math.max(2, y(0) - y(p));
             const dim = hover !== null && hover !== j;
             return (
-              <g key={j} className="ease" opacity={dim ? 0.4 : 1}>
+              <g key={j} style={{ opacity: dim ? 0.45 : 1, transition: "opacity 300ms cubic-bezier(.22,.61,.36,1)" }}>
                 <title>{`${bucketLabels[j]}: pays $${target[j].toFixed(2)}`}</title>
-                <path d={topRounded(x0, y(0) - h, bw, h, 4)} fill={profit ? COLORS.violet : COLORS.ash} />
+                <path d={topRounded(x0, y(0) - h, bw, h, 4)} fill={profit ? COLORS.violet : COLORS.ash} className="rise" style={{ animationDelay: `${j * 30}ms` }} />
               </g>
             );
           })}
+          {/* single-contract comparison, over the bars: narrow grey bars; off-scale bars are capped and labelled once */}
+          {compare &&
+            compareVals.map((c, j) => {
+              if (c <= 0.5) return null;
+              const x0 = (x(j) ?? 0) + bw * 0.3;
+              const cw = Math.max(3, bw * 0.4);
+              const yTop = c > yMax ? top : y(c);
+              return (
+                <g key={`c${j}`} pointerEvents="none">
+                  <path d={topRounded(x0, yTop, cw, y(0) - yTop, 3)} fill={COLORS.smoke} fillOpacity={0.9} stroke={COLORS.white} strokeWidth={1.5} className="rise" style={{ animationDelay: `${250 + j * 30}ms` }} />
+                  {c > yMax && <path d={`M${x0},${top + 6} L${x0 + cw / 2},${top - 2} L${x0 + cw},${top + 6}`} fill="none" stroke={COLORS.white} strokeWidth={1.5} />}
+                </g>
+              );
+            })}
+          {compare &&
+            (() => {
+              const idx = compare.map((c, j) => (c > yMax ? j : -1)).filter((j) => j >= 0);
+              if (!idx.length) return null;
+              const x0 = x(idx[0]) ?? 0;
+              const x1 = (x(idx[idx.length - 1]) ?? 0) + bw;
+              const v = compare[idx[0]];
+              // Keep the label inside the plot: centre it over the run, but anchor to an edge if it would overflow.
+              const mid = (x0 + x1) / 2;
+              const half = 150;
+              const anchor = mid + half > width - MARGIN.right ? "end" : mid - half < MARGIN.left ? "start" : "middle";
+              const lx = anchor === "end" ? width - MARGIN.right : anchor === "start" ? MARGIN.left : mid;
+              return (
+                <text x={lx} y={top - 10} textAnchor={anchor} fontSize={12} fill={COLORS.slate} className="tnum" pointerEvents="none">
+                  one contract pays ${v.toLocaleString("en-US", { maximumFractionDigits: 0 })} here, $0 everywhere else
+                </text>
+              );
+            })()}
           {/* stake line */}
           <line x1={MARGIN.left} x2={width - MARGIN.right} y1={ys} y2={ys} stroke={COLORS.ink} strokeWidth={1.25} strokeDasharray="5 5" />
           <g transform={`translate(${width - MARGIN.right - 100}, ${ys - 26})`}>
@@ -83,10 +120,16 @@ export function PayoutChart({ payouts: target, stake, hover, onHover, outcome, o
           </g>
           {/* hovered value */}
           {hover !== null && (
-            <g pointerEvents="none" transform={`translate(${(x(hover) ?? 0) + bw / 2}, ${y(payouts[hover]) - 12})`}>
-              <rect x={-34} y={-18} width={68} height={22} rx={11} fill={target[hover] > stake ? COLORS.violet : COLORS.ink} />
+            <g
+              pointerEvents="none"
+              style={{
+                transform: `translate(${Math.min(width - MARGIN.right - (compare ? 92 : 34), Math.max(MARGIN.left + (compare ? 92 : 34), (x(hover) ?? 0) + bw / 2))}px, ${Math.max(top + 10, y(payouts[hover]) - 12)}px)`,
+                transition: "transform 220ms cubic-bezier(.22,.61,.36,1)",
+              }}
+            >
+              <rect x={compare ? -92 : -34} y={-18} width={compare ? 184 : 68} height={22} rx={11} fill={target[hover] > stake ? COLORS.violet : COLORS.ink} />
               <text y={-3} textAnchor="middle" fontSize={12.5} fontWeight={700} fill={COLORS.white} className="tnum">
-                ${target[hover].toFixed(0)}
+                {compare ? `Contour $${target[hover].toFixed(0)} · one $${compare[hover].toFixed(0)}` : `$${target[hover].toFixed(0)}`}
               </text>
             </g>
           )}

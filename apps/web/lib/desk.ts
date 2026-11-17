@@ -14,6 +14,17 @@ export interface MarketSummary {
   volume: number | null;
   marketProb: number[];
   cutLabels: string[];
+  bucketLabels: string[];
+  readout: { center: string | null; spread: string | null; leader: string | null; leaderProb: number | null };
+  teaser: {
+    belief: number[];
+    worst: number;
+    best: number;
+    probProfitYou: number;
+    payouts: number[];
+    trade: boolean;
+    focus?: { label: string; marketProb: number; yourProb: number; paysIfWins: number };
+  } | null;
 }
 
 export interface StoredQuote {

@@ -60,3 +60,43 @@ function useStableArray(v: number) {
   if (ref.current[0] !== v) ref.current = [v];
   return ref.current;
 }
+
+/**
+ * Like useTweenedArray, but each element starts slightly after its left neighbour, so a change
+ * sweeps across the chart from left to right. Eased with a cubic ease-out.
+ */
+export function useStaggeredArray(target: readonly number[], duration = 520, stagger = 28): number[] {
+  const [value, setValue] = useState<number[]>(() => [...target]);
+  const cur = useRef<number[]>([...target]);
+  const raf = useRef<number | null>(null);
+  useEffect(() => {
+    if (cur.current.length !== target.length || reducedMotion()) {
+      cur.current = [...target];
+      setValue([...target]);
+      return;
+    }
+    const from = [...cur.current];
+    if (from.every((v, i) => Math.abs(v - target[i]) < 1e-9)) return;
+    const t0 = performance.now();
+    const total = duration + stagger * (target.length - 1);
+    const step = (now: number) => {
+      const t = Math.max(0, now - t0);
+      const next = target.map((to, i) => {
+        const k = Math.min(1, Math.max(0, (t - i * stagger) / duration));
+        const e = 1 - Math.pow(1 - k, 3);
+        return from[i] + (to - from[i]) * e;
+      });
+      cur.current = next;
+      setValue(next);
+      if (t < total) raf.current = requestAnimationFrame(step);
+      else raf.current = null;
+    };
+    if (raf.current) cancelAnimationFrame(raf.current);
+    raf.current = requestAnimationFrame(step);
+    return () => {
+      if (raf.current) cancelAnimationFrame(raf.current);
+      raf.current = null;
+    };
+  }, [target, duration, stagger]);
+  return value;
+}

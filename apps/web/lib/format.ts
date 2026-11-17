@@ -21,5 +21,13 @@ export function untilLabel(iso: string, now = Date.now()) {
   if (m < 60) return `in ${m}m`;
   const h = Math.floor(m / 60);
   if (h < 48) return `in ${h}h ${m % 60}m`;
-  return `in ${Math.floor(h / 24)}d ${h % 24}h`;
+  const d = Math.floor(h / 24);
+  if (d > 60) return `in ${Math.round(d / 30.4)} months`;
+  return `in ${d}d ${h % 24}h`;
+}
+export function settleShort(iso: string) {
+  const d = new Date(iso);
+  const day = d.toLocaleDateString("en-US", { weekday: "short", timeZone: "America/New_York" });
+  const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
+  return `${day} ${time} ET`;
 }

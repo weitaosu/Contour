@@ -73,8 +73,7 @@ There are three ways to run it. Pick the first that answers your question.
 ```bash
 cp apps/desk/.env.example apps/desk/.env
 cp apps/web/.env.example apps/web/.env.local
-pnpm dev:desk      # terminal 1 -> http://localhost:4000
-pnpm dev:web       # terminal 2 -> http://localhost:3000
+pnpm dev           # starts the desk (http://localhost:4000) and the web app (http://localhost:3000) together
 ```
 
 Everything that reads Gemini works: the market list, the forecast screen (sliders, drag-to-reshape, payouts, the five numbers, comparison, legs), desk quotes and `/replay`. Without desk keys the desk logs `[chain] disabled` and the Confirm button stays off: that is expected.
@@ -87,9 +86,8 @@ Install the Solana CLI ([guide](https://solana.com/docs/intro/installation)), th
 pnpm local:up          # starts solana-test-validator with the compiled program (programs/contour/build/contour.so),
                        # generates git-ignored keys in keys/, creates a test USDC mint, funds the desk, initializes Config,
                        # and writes apps/desk/.env.localnet + apps/web/.env.localnet
-pnpm dev:desk:local    # terminal 1
-pnpm dev:web:local     # terminal 2
-pnpm e2e:local         # terminal 3: wallet -> faucet -> quote -> open_position -> desk accepts + hedges; checks the vault
+pnpm dev:local         # desk + web against the local validator (http://localhost:3000)
+pnpm e2e:local         # in a second terminal: wallet -> faucet -> quote -> open_position -> desk accepts + hedges; checks the vault
 ```
 
 `e2e:local` prints `E2E OK` when the vault holds exactly `max(stake, max payout)` and the desk has recorded its fills. To click through in a browser instead, point Phantom at `http://127.0.0.1:8899` (Settings → Developer settings) and use the in-app *Get test USDC* button.

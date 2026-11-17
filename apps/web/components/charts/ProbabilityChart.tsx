@@ -2,7 +2,7 @@
 
 import { scaleLinear } from "d3-scale";
 import { area, curveMonotoneX, line } from "d3-shape";
-import { useMemo, useRef, useState, type ReactNode } from "react";
+import { useId, useMemo, useRef, useState, type ReactNode } from "react";
 import { bandScale, COLORS, MARGIN, niceMax, tickStride } from "./common";
 import { useSize } from "./useSize";
 import { useTweenedArray } from "./useTween";
@@ -39,6 +39,7 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
   const { bucketLabels, cutLabels, hover, onHover, editable, height = 320, compact, drag } = props;
   const { ref, width: measured } = useSize<HTMLDivElement>();
   const width = measured || 600;
+  const clipId = `pc${useId().replace(/:/g, "")}`;
   const n = props.market.length;
   const market = useTweenedArray(props.market, 0.18);
   const youTarget = useMemo(() => props.you ?? null, [props.you]);
@@ -182,39 +183,59 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
 
           {editable ? (
             <>
+              {you?.map((v, j) => (
+                <g key={`y${j}`} className="ease" opacity={hover === null || hover === j ? 1 : 0.75}>
+                  <rect x={x(j)} y={y(v)} width={bw} height={Math.max(0, y(0) - y(v))} rx={4} fill={COLORS.violet} fillOpacity={0.85} />
+                </g>
+              ))}
+              {/* market, on top: narrow grey bar so you can see exactly where you differ */}
               {market.map((v, j) => (
-                <g key={`m${j}`}>
-                  <rect x={x(j)} y={y(v)} width={bw} height={Math.max(0, y(0) - y(v))} rx={4} fill={COLORS.mist} />
+                <g key={`m${j}`} pointerEvents="none">
+                  <rect x={(x(j) ?? 0) + bw * 0.32} y={y(v)} width={bw * 0.36} height={Math.max(0, y(0) - y(v))} rx={3} fill={COLORS.smoke} stroke={COLORS.white} strokeWidth={1.5} />
                 </g>
               ))}
               {you?.map((v, j) => (
-                <g key={`y${j}`} className="ease" opacity={hover === null || hover === j ? 1 : 0.7}>
-                  <rect x={(x(j) ?? 0) + bw * 0.22} y={y(v)} width={bw * 0.56} height={Math.max(0, y(0) - y(v))} rx={4} fill={COLORS.violet} fillOpacity={0.22} />
-                  <rect x={(x(j) ?? 0) + bw / 2 - 11} y={y(v) - 6} width={22} height={12} rx={6} fill={COLORS.white} stroke={COLORS.violet} strokeWidth={2} />
-                </g>
+                <rect key={`h${j}`} x={(x(j) ?? 0) + bw / 2 - 11} y={y(v) - 6} width={22} height={12} rx={6} fill={COLORS.white} stroke={COLORS.violet} strokeWidth={2} pointerEvents="none" />
               ))}
             </>
           ) : (
             <>
-              {/* market: soft grey area */}
+              {/* market: soft grey area underneath */}
               <path d={areaGen(pts(market)) ?? ""} fill={COLORS.mist} fillOpacity={0.9} />
-              <path d={lineGen(pts(market)) ?? ""} fill="none" stroke={COLORS.smoke} strokeWidth={1.5} />
-              {/* you: violet line over a light violet wash */}
+              {/* you: violet wash and line, drawn in left to right when the chart appears */}
               {you && (
                 <>
-                  <path d={areaGen(pts(you)) ?? ""} fill={COLORS.violet} fillOpacity={0.1} />
-                  <path d={lineGen(pts(you)) ?? ""} fill="none" stroke={COLORS.violet} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
+                  <defs>
+                    <clipPath id={clipId}>
+                      <rect x={0} y={0} width={width} height={height} className="reveal-x" />
+                    </clipPath>
+                  </defs>
+                  <path d={areaGen(pts(you)) ?? ""} fill={COLORS.violet} fillOpacity={0.12} clipPath={`url(#${clipId})`} />
+                  <path d={lineGen(pts(you)) ?? ""} pathLength={1} className="draw" fill="none" stroke={COLORS.violet} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />
                 </>
               )}
+              {/* market line drawn on top so the comparison is always visible */}
+              <path d={lineGen(pts(market)) ?? ""} fill="none" stroke={COLORS.slate} strokeWidth={1.75} strokeDasharray="5 4" />
             </>
           )}
 
-          {/* crosshair */}
-          {hover !== null && !compact && (
-            <g pointerEvents="none">
-              <line x1={cx(hover)} x2={cx(hover)} y1={top - 4} y2={y(0)} stroke={COLORS.ink} strokeOpacity={0.25} strokeWidth={1} strokeDasharray="3 3" />
-              {!editable && <circle cx={cx(hover)} cy={y(market[hover])} r={4.5} fill={COLORS.white} stroke={COLORS.smoke} strokeWidth={2} />}
-              {!editable && hoverYou !== null && <circle cx={cx(hover)} cy={y(hoverYou)} r={5.5} fill={COLORS.violet} stroke={COLORS.white} strokeWidth={2} />}
+          {/* crosshair: glides between buckets instead of jumping */}
+          {!compact && (
+            <g
+              pointerEvents="none"
+              style={{
+                transform: `translateX(${hover !== null ? cx(hover) : cx(0)}px)`,
+                opacity: hover !== null ? 1 : 0,
+                transition: "transform 220ms cubic-bezier(.22,.61,.36,1), opacity 200ms ease",
+              }}
+            >
+              <line x1={0} x2={0} y1={top - 4} y2={y(0)} stroke={COLORS.ink} strokeOpacity={0.22} strokeWidth={1} strokeDasharray="3 3" />
+              {!editable && hover !== null && (
+                <circle cx={0} cy={y(market[hover])} r={4.5} fill={COLORS.white} stroke={COLORS.smoke} strokeWidth={2} style={{ transition: "cy 220ms cubic-bezier(.22,.61,.36,1)" }} />
+              )}
+              {!editable && hover !== null && hoverYou !== null && (
+                <circle cx={0} cy={y(hoverYou)} r={5.5} fill={COLORS.violet} stroke={COLORS.white} strokeWidth={2} style={{ transition: "cy 220ms cubic-bezier(.22,.61,.36,1)" }} />
+              )}
             </g>
           )}
 
@@ -274,7 +295,7 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
           className="pointer-events-none absolute left-0 top-0 z-10 w-[220px] rounded-2xl border border-mist bg-porcelain/95 px-4 py-3 text-[14px] backdrop-blur-sm"
           style={{
             transform: `translate(${Math.min(Math.max(0, cx(hover) - 110), width - 220)}px, ${Math.max(0, y(Math.max(market[hover], hoverYou ?? 0)) - 128)}px)`,
-            transition: "transform 140ms cubic-bezier(.2,.8,.2,1)",
+            transition: "transform 220ms cubic-bezier(.22,.61,.36,1)",
           }}
         >
           {props.tooltip(hover)}

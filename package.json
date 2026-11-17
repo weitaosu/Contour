@@ -6,6 +6,8 @@
     "node": ">=22"
   },
   "scripts": {
+    "dev": "pnpm --parallel --filter @contour/desk --filter @contour/web dev",
+    "dev:local": "sh -c 'pnpm dev:desk:local & pnpm dev:web:local & wait'",
     "test": "pnpm --filter @contour/core --filter @contour/gemini --filter @contour/desk test",
     "typecheck": "pnpm -r typecheck",
     "dev:desk": "pnpm --filter @contour/desk dev",
