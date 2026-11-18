@@ -32,7 +32,12 @@ import { CandidateEditor } from "./CandidateEditor";
 
 type ShownQuote = Omit<Quote, "raw"> & { iterations?: number };
 
+// Confidence is a four-step dial. 0 is left out: with no trust in your own forecast there is nothing to trade.
+const CONFIDENCE_LEVELS = [0.25, 0.5, 0.75, 1] as const;
+const CONFIDENCE_NAMES = ["mostly the market", "half and half", "mostly my forecast", "only my forecast"] as const;
 const DEFAULT_CONFIDENCE = 0.25;
+const snapConfidence = (c: number) =>
+  CONFIDENCE_LEVELS.reduce((best, l) => (Math.abs(l - c) < Math.abs(best - c) ? l : best), CONFIDENCE_LEVELS[0]);
 
 export interface Preset { c?: number; w?: number; x?: number; s?: number }
 
@@ -69,7 +74,7 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
   const [edit, setEdit] = useState(!ordered);
   const [bars, setBars] = useState<number[] | null>(ordered ? null : ladder.marketProb);
   const [draft, setDraft] = useState<number[] | null>(null);
-  const [confidence, setConfidence] = useState(() => Math.min(1, Math.max(0, preset.c ?? DEFAULT_CONFIDENCE)));
+  const [confidence, setConfidence] = useState<number>(() => snapConfidence(preset.c ?? DEFAULT_CONFIDENCE));
   const [stake, setStake] = useState(() => (preset.s && preset.s > 0 ? preset.s : 100));
   const [hover, setHover] = useState<number | null>(null);
 
@@ -342,12 +347,12 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
             <Slider
               label="Confidence"
               value={confidence}
-              min={0}
-              max={1}
-              step={0.01}
-              onChange={setConfidence}
+              min={CONFIDENCE_LEVELS[0]}
+              max={CONFIDENCE_LEVELS[CONFIDENCE_LEVELS.length - 1]}
+              step={0.25}
+              onChange={(v) => setConfidence(snapConfidence(v))}
               display={pct(confidence)}
-              valueText={`${Math.round(confidence * 100)} percent trust in my forecast`}
+              valueText={`${Math.round(confidence * 100)} percent trust in my forecast, ${CONFIDENCE_NAMES[CONFIDENCE_LEVELS.indexOf(confidence as (typeof CONFIDENCE_LEVELS)[number])]}`}
               ends={["Trust the market", "Trust my forecast"]}
             />
           </div>
