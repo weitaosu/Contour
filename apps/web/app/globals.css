@@ -103,6 +103,16 @@ h1, h2, h3, h4 { font-weight: 700; color: var(--color-inkstone); }
 @keyframes rise { from { transform: scaleY(0); } to { transform: scaleY(1); } }
 .rise { transform-box: fill-box; transform-origin: center bottom; animation: rise 650ms cubic-bezier(.22,.61,.36,1) both; }
 @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+/* text that changes meaning (a headline, a label) settles in rather than snapping */
+@keyframes text-swap { from { opacity: 0; translate: 0 4px; filter: blur(2px); } to { opacity: 1; translate: 0 0; filter: blur(0); } }
+.text-swap { display: inline-block; animation: text-swap 420ms var(--spring-soft) both; }
+text.text-swap { display: inline; }
+/* a shaded zone opening out from its middle */
+@keyframes zone-in { from { opacity: 0; transform: scaleX(0.35); } to { opacity: 1; transform: scaleX(1); } }
+.zone-in { transform-box: fill-box; transform-origin: center; animation: zone-in var(--spring-ms) var(--spring-soft) both; }
+/* sliders set from outside glide there; a hand on them moves them directly */
+.slider-glide span:has(> [role="slider"]) { transition: left 460ms var(--spring-soft); }
+.slider-glide .slider-range { transition: left 460ms var(--spring-soft), right 460ms var(--spring-soft); }
 .fade-in { animation: fade-in 400ms cubic-bezier(.22,.61,.36,1) both; }
 @keyframes pulse-ring { 0% { transform: scale(.6); opacity: .55; } 100% { transform: scale(1.9); opacity: 0; } }
 .pulse-ring { transform-box: fill-box; transform-origin: center; animation: pulse-ring 1.8s cubic-bezier(.2,.8,.2,1) infinite; }

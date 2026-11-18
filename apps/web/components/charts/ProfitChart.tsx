@@ -1,11 +1,15 @@
 "use client";
 
 import { scaleLinear } from "d3-scale";
-import { useId, useMemo } from "react";
+import { useEffect, useId, useMemo, useRef } from "react";
 import { runs } from "@/lib/outcomes";
 import { COLORS, MARGIN, niceMax, tickStride } from "./common";
 import { useSize } from "./useSize";
 import { useMorph } from "./useTween";
+
+/** How long the bars' left-to-right wave takes to cross the chart: on first sight, and on a change. */
+const WAVE_IN = 360;
+const WAVE = 180;
 
 export const GAIN = "#1aab8b";
 const GAIN_DEEP = "#12846a";
@@ -32,6 +36,8 @@ export interface ProfitChartProps {
   now?: { value: number; label: string } | null;
   /** Draw the market's likely range as a bracket under the axis (it still sets the zoom either way). */
   likelyBracket?: boolean;
+  /** The view is being dragged: bars glide together (no wave) so they keep up with the pointer. */
+  live?: boolean;
 }
 
 /**
@@ -116,6 +122,7 @@ export function ProfitChart({
   cuts = null,
   now = null,
   likelyBracket = true,
+  live = false,
 }: ProfitChartProps) {
   const { ref, width: measured } = useSize<HTMLDivElement>();
   const width = measured || 600;
@@ -134,8 +141,20 @@ export function ProfitChart({
   const loT = -niceMax(Math.max(stake * 0.08, ...inWindow.map((v) => -v)) * 1.04);
 
   // One timeline for everything that moves: bar heights, y-range and the zoom window glide together.
+  // The bars move as a wave, left to right across the window: on first sight they grow out of the
+  // $0 line (WAVE_IN), and when the view changes each one follows a beat after its neighbour
+  // (WAVE). While the view is being dragged they glide together, so they keep up.
   const goal = useMemo(() => [...target, hiT, loT, wa, wb], [target, hiT, loT, wa, wb]);
-  const m = useMorph(goal, 480);
+  const entering = useRef(true);
+  const waveMs = live ? 0 : entering.current ? WAVE_IN : WAVE;
+  const along = (pos: number) => Math.min(1, Math.max(0, (pos - wa) / Math.max(1, wb - wa)));
+  const m = useMorph(goal, 480, {
+    from: useMemo(() => [...target.map(() => 0), hiT, loT, wa, wb], []), // eslint-disable-line react-hooks/exhaustive-deps
+    delay: (i) => (i < n ? along(i) * waveMs : 0),
+  });
+  useEffect(() => {
+    entering.current = false;
+  }, []);
   const pl = m.slice(0, n);
   const [hi, lo, w0, w1] = [m[n], m[n + 1], m[n + 2], m[n + 3]];
 
@@ -168,9 +187,9 @@ export function ProfitChart({
   // dragged), so the shading slides with the bars instead of blinking from one spot to the next.
   // (On the render where the count changes, the spring still holds the old count: use the new edges.)
   const zoneGoal = zones.flatMap(([a, b]) => [a, b + 1]);
-  const zoneMorph = useMorph(zoneGoal, 480);
+  const zoneMorph = useMorph(zoneGoal, 480, { delay: (i, g) => along(g[i]) * waveMs });
   const zoneEdges = zoneMorph.length === zoneGoal.length ? zoneMorph : zoneGoal;
-  const beMorph = useMorph(breakevens, 480);
+  const beMorph = useMorph(breakevens, 480, { delay: (i, g) => along(g[i]) * waveMs });
   const beAt = beMorph.length === breakevens.length ? beMorph : breakevens;
   const stride = ordered ? tickStride(wb - wa + 1, right - left, 52) : tickStride(n, right - left, 92);
   const visible = (px: number) => px >= left - 1 && px <= right + 1;
@@ -259,11 +278,13 @@ export function ProfitChart({
               const lo = Math.max(Math.max(left, x0) + zoneHalf + 4, clearLeft);
               const hi = Math.min(Math.min(right, x1) - zoneHalf - 4, clearRight);
               const cx = Math.min(hi, Math.max(lo, (Math.max(left, x0) + Math.min(right, x1)) / 2));
+              // A zone that appears opens out from its middle as the wave of bars reaches it.
+              const at = `${Math.round(along((zoneGoal[2 * i] + zoneGoal[2 * i + 1]) / 2) * waveMs)}ms`;
               return (
-                <g key={`z${i}`} className="fade-in">
-                  <rect x={x0} y={top - 22} width={Math.max(0, x1 - x0)} height={yBase - top + 22} rx={12} fill={GAIN} fillOpacity={0.07} />
+                <g key={`z${i}`}>
+                  <rect x={x0} y={top - 22} width={Math.max(0, x1 - x0)} height={yBase - top + 22} rx={12} fill={GAIN} fillOpacity={0.07} className="zone-in" style={{ animationDelay: at }} />
                   {lo <= hi && !cutLabels2.some(({ span }) => cx - zoneHalf < span[1] && span[0] < cx + zoneHalf) && (
-                    <text x={cx} y={top - 8} textAnchor="middle" fontSize={12} fontWeight={700} fill={GAIN_DEEP}>
+                    <text x={cx} y={top - 8} textAnchor="middle" fontSize={12} fontWeight={700} fill={GAIN_DEEP} className="text-swap" style={{ animationDelay: at }}>
                       Profit zone
                     </text>
                   )}

@@ -907,6 +907,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                   likely={likely}
                   now={nowMark}
                   status={summaryStatus}
+                  live={dragging}
                 />
               )}
             </Panel>

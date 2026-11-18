@@ -5,7 +5,7 @@ import { area, curveMonotoneX, line } from "d3-shape";
 import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bandScale, COLORS, MARGIN, niceMax, tickStride } from "./common";
 import { useSize } from "./useSize";
-import { useTweenedArray, useTweenedNumber } from "./useTween";
+import { useMorph } from "./useTween";
 
 export interface ShapeDrag {
   /** Current center of the user's curve, in outcome units (for the handle). */
@@ -60,12 +60,20 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
   const width = measured || 600;
   const clipId = `pc${useId().replace(/:/g, "")}`;
   const n = props.market.length;
-  const market = useTweenedArray(props.market, 0.18);
+  // Both curves move on the charts' spring (the same one as the bars in "What you make"): on first
+  // sight they rise out of the baseline together, left to right; after that they glide to new
+  // shapes. While the curve is being dragged it follows the pointer exactly.
+  const zeros = useMemo(() => props.market.map(() => 0), []); // eslint-disable-line react-hooks/exhaustive-deps
+  const rise = useRef(true);
+  const riseDelay = (i: number) => (rise.current ? (i / Math.max(1, n - 1)) * 260 : 0);
+  const market = useMorph(props.market, 620, { from: zeros, delay: riseDelay });
   const youTarget = useMemo(() => props.you ?? null, [props.you]);
   const [draft, setDraft] = useState<number[] | null>(null);
   const [dragging, setDragging] = useState(false);
-  // While the curve is being dragged it follows the pointer exactly; otherwise it eases to new shapes.
-  const youTween = useTweenedArray(youTarget ?? props.market, 0.3, dragging);
+  const youTween = useMorph(youTarget ?? props.market, 480, { from: zeros, delay: riseDelay, immediate: dragging });
+  useEffect(() => {
+    rise.current = false;
+  }, []);
   const you = draft ?? (youTarget ? youTween : null);
 
   // The band above the plot holds the hover readout; on a narrow chart it can take two lines.
@@ -73,7 +81,7 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
   const bottom = compact ? 6 : 34;
   const x = useMemo(() => bandScale(n, width, editable ? 0.14 : 0), [n, width, editable]);
   // The y range glides when the curve outgrows it, instead of snapping the whole chart to a new scale.
-  const yMax = useTweenedNumber(niceMax(Math.max(0.05, ...props.market, ...(props.you ?? [])) * 1.12), 0.2);
+  const yMax = useMorph([niceMax(Math.max(0.05, ...props.market, ...(props.you ?? [])) * 1.12)], 620)[0];
   const y = useMemo(() => scaleLinear().domain([0, yMax]).range([height - bottom, top]), [yMax, height, top, bottom]);
   const bw = x.bandwidth();
   const left = MARGIN.left;
@@ -187,7 +195,11 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
   const yTicks = y.ticks(3);
   const ordered = cutLabels.length === n - 1;
   const stride = ordered ? tickStride(cutLabels.length, right - left, 58) : tickStride(n, right - left, 92);
-  const handle = drag && valueToX && you ? { hx: Math.min(right, Math.max(left, valueToX.toX(drag.center))), hy: y(peakOf(you)) } : null;
+  // The handle glides with the curve when the view changes (it already rides the curve's height),
+  // and sits exactly under the pointer while dragging.
+  const hxTarget = drag && valueToX ? Math.min(right, Math.max(left, valueToX.toX(drag.center))) : 0;
+  const hx = useMorph([hxTarget], 480, { immediate: dragging })[0];
+  const handle = drag && valueToX && you ? { hx, hy: y(peakOf(you)) } : null;
   const hoverYou = hover !== null && you ? you[hover] : null;
   // The readout pill keeps showing the last outcome while it fades out, and is measured so it can be
   // centered on the crosshair without running off either edge.

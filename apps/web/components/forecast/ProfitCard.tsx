@@ -38,6 +38,7 @@ export const ProfitSummary = memo(function ProfitSummary({
   note,
   now = null,
   status = null,
+  live = false,
 }: {
   ladder: Ladder;
   quote: Omit<Quote, "raw">;
@@ -52,6 +53,8 @@ export const ProfitSummary = memo(function ProfitSummary({
   /** The underlying's live price, marked on the chart. */
   now?: { value: number; label: string } | null;
   status?: SummaryStatus | null;
+  /** The view is being dragged (see ProfitChart). */
+  live?: boolean;
 }) {
   const payouts = quote.payoutByBucket;
   const pl = payouts.map((p) => p - stake);
@@ -70,6 +73,10 @@ export const ProfitSummary = memo(function ProfitSummary({
       {/* the one-sentence answer */}
       <div>
         <p id="pl-headline" className="text-[18px] font-bold leading-snug text-inkstone xl:text-[19px]" aria-live="polite">
+          <span
+            key={live ? "live" : status ? status.title : small ? `s${Math.round(quote.minPayout)}-${Math.round(quote.maxPayout)}` : whenPhrase(ladder, zones)}
+            className={live ? "" : "text-swap"}
+          >
           {status ? (
             status.title
           ) : small ? (
@@ -85,6 +92,7 @@ export const ProfitSummary = memo(function ProfitSummary({
               You make money <span className="text-signal-violet">{whenPhrase(ladder, zones)}</span>.
             </>
           )}
+          </span>
         </p>
         {status?.detail ? (
           <div className="mt-0.5 text-[13.5px] text-slate">{status.detail}</div>
@@ -130,6 +138,7 @@ export const ProfitSummary = memo(function ProfitSummary({
                 bucketLabels={ladder.bucketLabels}
                 likely={likely}
                 likelyBracket={false}
+                live={live}
                 cuts={ladder.cuts}
                 now={now}
                 height={h}

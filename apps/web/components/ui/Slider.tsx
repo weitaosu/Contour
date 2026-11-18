@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Slider as RSlider } from "radix-ui";
 
 export function Slider({
@@ -28,6 +29,9 @@ export function Slider({
   caption?: React.ReactNode;
   compact?: boolean;
 }) {
+  // While a pointer holds it the thumb follows the hand exactly; when the value is set from outside
+  // (picking an outlook), thumb and fill glide there on the spring.
+  const [held, setHeld] = useState(false);
   return (
     <div className={`flex flex-col ${compact ? "gap-1" : "gap-3"}`}>
       <div className="flex items-baseline justify-between gap-3">
@@ -37,7 +41,10 @@ export function Slider({
         )}
       </div>
       <RSlider.Root
-        className="relative flex h-6 w-full touch-none items-center"
+        className={`relative flex h-6 w-full touch-none items-center ${held ? "" : "slider-glide"}`}
+        onPointerDown={() => setHeld(true)}
+        onPointerUp={() => setHeld(false)}
+        onLostPointerCapture={() => setHeld(false)}
         value={[value]}
         min={min}
         max={max}
@@ -46,7 +53,7 @@ export function Slider({
         aria-label={label}
       >
         <RSlider.Track className="relative h-[6px] grow cursor-pointer rounded-full bg-mist">
-          <RSlider.Range className="absolute h-full rounded-full bg-signal-violet" />
+          <RSlider.Range className="slider-range absolute h-full rounded-full bg-signal-violet" />
         </RSlider.Track>
         <RSlider.Thumb
           aria-valuetext={valueText}
