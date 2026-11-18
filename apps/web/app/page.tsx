@@ -5,20 +5,32 @@ import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { compile, fromMarket, marketMoments, type Ladder } from "@contour/core";
 
+import { LineChart, Lock, SlidersHorizontal, Search } from "lucide-react";
+import { desk, type MarketSummary } from "@/lib/desk";
+import exampleLadder from "@/lib/example-ladder.json";
+
 const VIEWS = [
   { label: "A tighter view", shift: 0, scale: 0.6 },
   { label: "A bullish view", shift: 0.6, scale: 0.8 },
   { label: "A tighter view", shift: 0, scale: 0.6 },
   { label: "A bearish view", shift: -0.6, scale: 0.8 },
 ];
-import { LineChart, Lock, SlidersHorizontal, Search } from "lucide-react";
-import { desk, type MarketSummary } from "@/lib/desk";
+
+/**
+ * The SOL Nov 20 ladder frozen on Nov 17 (fixtures/sol_calm.json, the FAQ's calm-week example).
+ * Shown when live market data can't be loaded, so the hero is never blank.
+ */
+const EXAMPLE = exampleLadder.ladder as unknown as Ladder;
+const EXAMPLE_DATE = new Date(exampleLadder.capturedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" });
 import { MarketCard } from "@/components/MarketCard";
+import { FrozenBanner } from "@/components/FrozenBanner";
 import { ProbabilityChart } from "@/components/charts/ProbabilityChart";
-import { PayoutChart } from "@/components/charts/PayoutChart";
+import { ProfitChart } from "@/components/charts/ProfitChart";
+import { oneIn } from "@/components/forecast/ProfitCard";
 import { Accordion, AccordionItem } from "@/components/ui/Accordion";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { pct, usd0 } from "@/lib/format";
+import { isWin } from "@/lib/outcomes";
 
 function pickFeatured(ms: MarketSummary[]): MarketSummary | undefined {
   const dayAhead = Date.now() + 24 * 3600_000;
@@ -27,8 +39,13 @@ function pickFeatured(ms: MarketSummary[]): MarketSummary | undefined {
   return sol[0] ?? ms.find((m) => m.kind === "threshold");
 }
 
-function HeroMockup({ ticker }: { ticker: string }) {
-  const q = useQuery({ queryKey: ["ladder", ticker], queryFn: () => desk.ladder(ticker), refetchInterval: 30_000 });
+function HeroMockup({ ticker }: { ticker: string | null }) {
+  const q = useQuery({ queryKey: ["ladder", ticker], queryFn: () => desk.ladder(ticker!), refetchInterval: 30_000, enabled: ticker !== null });
+  // Live when we have it; the saved example when Gemini (or the desk) can't provide one.
+  const live = ticker !== null && !!q.data;
+  const source: Ladder | null = live ? q.data!.ladder : ticker === null || q.isError ? EXAMPLE : null;
+  // The desk itself may be serving its frozen copy of Gemini (Gemini down, desk up).
+  const frozenDate = live && q.data!.frozen ? new Date(q.data!.capturedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" }) : null;
   const [hover, setHover] = useState<number | null>(null);
   // Gently cycle through views so visitors see the curve and payouts reshape before they touch anything.
   const [phase, setPhase] = useState(0);
@@ -39,18 +56,20 @@ function HeroMockup({ ticker }: { ticker: string }) {
   }, [hover]);
   const viewSpec = VIEWS[phase];
   const view = useMemo(() => {
-    if (!q.data) return null;
-    const ladder: Ladder = q.data.ladder;
+    if (!source) return null;
+    const ladder = source;
     const sd = marketMoments(ladder).sd;
     const belief = fromMarket(ladder, viewSpec.shift * sd, viewSpec.scale);
     const quote = compile({ ladder, belief, confidence: 0.5, stakeUsd: 100 });
     return { ladder, belief, quote };
-  }, [q.data, viewSpec]);
+  }, [source, viewSpec]);
 
   if (!view) return <div className="h-[460px] rounded-[16px] bg-cloud" />;
   const { ladder, belief, quote } = view;
+  const wins = quote.payoutByBucket.map((p) => isWin(p, 100));
+  const chance = ladder.marketProb.reduce((s, q, j) => s + (wins[j] ? q : 0), 0);
   return (
-    <div className="relative mx-auto max-w-[1040px] pb-10 md:pb-32">
+    <div className="relative mx-auto max-w-[1040px] pb-10 md:pb-44">
       {/* code panel, back right */}
       <div className="absolute -right-12 -top-24 hidden w-[300px] rounded-[16px] bg-inkstone p-5 font-mono text-[12.5px] leading-relaxed text-ash [box-shadow:var(--shadow-xl)] lg:block">
         <div className="mb-2 text-smoke">// PositionOpened · devnet</div>
@@ -71,7 +90,9 @@ function HeroMockup({ ticker }: { ticker: string }) {
       <div className="relative rounded-[16px] border border-mist bg-porcelain p-6 [box-shadow:var(--shadow-xl)] md:mr-16 md:p-8">
         <div className="flex flex-wrap items-baseline justify-between gap-3">
           <div>
-            <p className="eyebrow">Live · {ladder.category}</p>
+            <p className="eyebrow">
+              {frozenDate ? `Frozen ${frozenDate} · ${ladder.category}` : live ? `Live · ${ladder.category}` : `Snapshot from ${EXAMPLE_DATE} · ${ladder.category}`}
+            </p>
             <p className="card-title mt-1">{ladder.title}</p>
           </div>
           <div className="flex items-center gap-4 text-[14px] text-slate">
@@ -85,24 +106,38 @@ function HeroMockup({ ticker }: { ticker: string }) {
         </div>
         <div className="mt-4">
           <ProbabilityChart bucketLabels={ladder.bucketLabels} cutLabels={ladder.cutLabels} cuts={ladder.cuts} market={ladder.marketProb} you={belief} hover={hover} onHover={setHover} height={240} />
-          <PayoutChart payouts={quote.payoutByBucket} stake={100} hover={hover} onHover={setHover} height={140} bucketLabels={ladder.bucketLabels} />
+          <p className="mb-1 mt-2 text-[13px] text-slate">Profit or loss on $100, by outcome</p>
+          <ProfitChart
+            pl={quote.payoutByBucket.map((p) => p - 100)}
+            wins={wins}
+            stake={100}
+            hover={hover}
+            onHover={setHover}
+            cutLabels={ladder.cutLabels}
+            bucketLabels={ladder.bucketLabels}
+            height={170}
+          />
         </div>
       </div>
-      {/* stats panel, front left */}
-      <div className="absolute -bottom-4 -left-10 hidden w-[250px] rounded-[16px] border border-mist bg-porcelain p-5 [box-shadow:var(--shadow-xl)] md:block">
+      {/* stats panel, front left: the same honest numbers the trade screen leads with */}
+      <div className="absolute -bottom-4 -left-10 hidden w-[260px] rounded-[16px] border border-mist bg-porcelain p-5 [box-shadow:var(--shadow-xl)] md:block">
         <p className="eyebrow">$100 position</p>
         <div className="mt-3 grid grid-cols-2 gap-4">
           <div>
-            <p className="text-[14px] text-smoke">Worst</p>
-            <p className="text-[20px] font-bold"><AnimatedNumber value={quote.minPayout} format={usd0} /></p>
+            <p className="text-[14px] text-smoke">Really at risk</p>
+            <p className="text-[20px] font-bold"><AnimatedNumber value={100 - quote.minPayout} format={usd0} /></p>
           </div>
           <div>
-            <p className="text-[14px] text-smoke">Best</p>
-            <p className="text-[20px] font-bold"><AnimatedNumber value={quote.maxPayout} format={usd0} /></p>
+            <p className="text-[14px] text-smoke">Best case</p>
+            <p className="text-[20px] font-bold text-gain">
+              +<AnimatedNumber value={quote.maxPayout - 100} format={usd0} />
+            </p>
           </div>
           <div className="col-span-2">
-            <p className="text-[14px] text-smoke">Profit if you&apos;re right</p>
-            <p className="text-[20px] font-bold text-signal-violet"><AnimatedNumber value={quote.probProfitBelief} format={(n) => pct(n)} /></p>
+            <p className="text-[14px] text-smoke">Chance of profit</p>
+            <p className="tnum text-[20px] font-bold">
+              {pct(chance)} <span className="text-[14px] font-medium text-slate">{oneIn(chance)} by the market</span>
+            </p>
           </div>
         </div>
       </div>
@@ -117,6 +152,12 @@ const SUBTITLE: Record<string, string> = {
   Politics: "Who will win? Races where exactly one candidate can win.",
   Economics: "Where will the number land?",
 };
+
+/** A group made only of races (one winner among named outcomes) gets race wording, whatever its category. */
+function subtitleFor(category: string, ms: MarketSummary[]): string | undefined {
+  if (ms.length && ms.every((m) => m.kind === "categorical")) return category === "Politics" ? SUBTITLE.Politics : "Which will it be? Exactly one of the outcomes wins.";
+  return SUBTITLE[category];
+}
 
 function WhatYouCanTrade() {
   const kinds = [
@@ -175,6 +216,8 @@ export default function Home() {
   const [cat, setCat] = useState<string | null>(null);
   const markets = q.data?.markets ?? [];
   const featured = pickFeatured(markets);
+  // The desk answered but Gemini gave it nothing (an outage), or the desk itself is down.
+  const offline = q.isError || (!!q.data && markets.length === 0);
   const ORDER = ["Crypto", "Commodities", "Weather", "Sports", "Economics", "Finance"];
   const cats = [...new Set(markets.map((m) => m.category))].sort((a, b) => (ORDER.indexOf(a) + 1 || 99) - (ORDER.indexOf(b) + 1 || 99));
   const filtered = markets.filter(
@@ -184,6 +227,11 @@ export default function Home() {
 
   return (
     <div>
+      {q.data?.frozenAt ? (
+        <div className="page pt-6">
+          <FrozenBanner at={q.data.frozenAt} />
+        </div>
+      ) : null}
       <section className="page pt-16 text-center md:pt-24">
         <p className="eyebrow">Gemini prediction markets · locked on Solana</p>
         <h1 className="display-lg mx-auto mt-5 max-w-4xl">Trade your whole view.</h1>
@@ -197,13 +245,17 @@ export default function Home() {
               Open the {featured.title.replace(/ price on /, " ")} ladder
             </Link>
           ) : (
-            <span className="btn btn-primary" aria-disabled="true">Loading markets…</span>
+            <span className="btn btn-primary" aria-disabled="true">
+              {offline ? "Live markets are unavailable right now" : "Loading markets…"}
+            </span>
           )}
           <a href="#how" className="btn btn-ghost">How it works</a>
         </div>
       </section>
 
-      <section className="page mt-16 md:mt-20">{featured ? <HeroMockup ticker={featured.ticker} /> : <div className="h-[460px] rounded-[16px] bg-cloud" />}</section>
+      <section className="page mt-16 md:mt-20">
+        {featured || offline ? <HeroMockup ticker={featured?.ticker ?? null} /> : <div className="h-[460px] rounded-[16px] bg-cloud" />}
+      </section>
 
       <section className="page mt-[112px]" id="markets">
         <div className="flex flex-col gap-6 md:flex-row md:items-end md:justify-between">
@@ -230,6 +282,11 @@ export default function Home() {
           ))}
         </div>
         {q.isError && <p className="card mt-8 text-slate">The desk is not reachable. Start it with <code>pnpm dev:desk</code>.</p>}
+        {q.data && markets.length === 0 && (
+          <p className="card mt-8 text-slate">
+            No markets came back from Gemini. Its prediction-market API isn&apos;t responding right now, so this list will fill in on its own when it recovers.
+          </p>
+        )}
         {!q.data && !q.isError && (
           <div className="mt-8 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
             {Array.from({ length: 6 }, (_, i) => <div key={i} className="card h-[230px]" />)}
@@ -239,7 +296,7 @@ export default function Home() {
           <div key={c} className="mt-12">
             <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
               <h3 className="eyebrow !text-inkstone">{c}</h3>
-              {SUBTITLE[c] && <span className="text-[14px] text-slate">{SUBTITLE[c]}</span>}
+              {subtitleFor(c, ms) && <span className="text-[14px] text-slate">{subtitleFor(c, ms)}</span>}
             </div>
             <div className="mt-4 grid gap-6 md:grid-cols-2 lg:grid-cols-3">
               {ms.map((m) => <MarketCard key={m.ticker} m={m} />)}

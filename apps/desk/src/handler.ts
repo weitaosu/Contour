@@ -1,4 +1,4 @@
-import { compile, scoreBps, normalizeEvent, outcomeBucket } from "@contour/core";
+import { compile, scoreBps, normalizeEvent, outcomeBucket, GEMINI_TAKER_FEE_RATE, tradingFeeUsd } from "@contour/core";
 import { decodeEvents } from "@contour/chain";
 import { PublicKey } from "@solana/web3.js";
 import { config } from "./config";
@@ -158,15 +158,16 @@ async function onOpened(ctx: HandlerCtx, position: string, d: Record<string, unk
   const openedMs = Number(g(d, "openedTs")) * 1000;
   if (openedMs - quote.createdAt > config.acceptMaxQuoteAgeMs) return note("Quote was older than 60 seconds at open; not accepting.");
 
-  // 2. Re-price the legs at current asks.
+  // 2. Re-price the legs at current asks, Gemini's taker fees included (the quote's cash is already net of fees).
   const legs = quote.quote.legs;
   let cost = quote.quote.cashUsd;
+  const feeRate = quote.quote.feeRate ?? GEMINI_TAKER_FEE_RATE;
   try {
     const fresh = await ctx.markets.getEvent(quote.ticker, 0);
     for (const l of legs) {
       const c = fresh.contracts.find((x) => x.instrumentSymbol === l.symbol);
       const ask = c?.prices?.buy?.[l.side];
-      cost += (ask ? Number(ask) : Infinity) * l.qty;
+      cost += ask ? Number(ask) * l.qty + tradingFeeUsd(l.qty, Number(ask), feeRate) : Infinity;
     }
   } catch (err) {
     return note(`Could not re-price on Gemini (${(err as Error).message}); not accepting.`);
@@ -195,7 +196,9 @@ async function onOpened(ctx: HandlerCtx, position: string, d: Record<string, unk
   for (const l of legs) {
     try {
       const f = await ctx.executor.place(l, quote.ticker);
-      insFill.run(position, f.symbol, f.side, l.strike, f.qty, f.price, f.quotedPrice, f.mode, f.status, JSON.stringify(f.detail), now());
+      // Record the Gemini taker fee the fill pays (simulated fills too), so fill costs reconcile with the quote.
+      const fee = f.price !== null && f.price !== undefined ? tradingFeeUsd(f.qty, f.price, feeRate) : 0;
+      insFill.run(position, f.symbol, f.side, l.strike, f.qty, f.price, f.quotedPrice, f.mode, f.status, JSON.stringify({ ...(f.detail ?? {}), fee }), now());
     } catch (err) {
       insFill.run(position, l.symbol, l.side, l.strike, l.qty, null, l.price, ctx.executor.mode, "unfilled", JSON.stringify({ label: l.label, reason: (err as Error).message }), now());
     }

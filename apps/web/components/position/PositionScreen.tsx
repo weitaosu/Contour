@@ -12,8 +12,10 @@ import { desk, type PositionView } from "@/lib/desk";
 import { explorerTx } from "@/lib/env";
 import { sendTx, useChainConfig, useProgram, useUsdcMint } from "@/lib/chain";
 import { cents, pct, qty, settleLabel, short, signed, untilLabel, usd } from "@/lib/format";
-import { PayoutChart } from "@/components/charts/PayoutChart";
-import { FiveNumbers } from "@/components/forecast/FiveNumbers";
+import { ProfitChart, GAIN } from "@/components/charts/ProfitChart";
+import { MoneySplit, oneIn, Tile } from "@/components/forecast/ProfitCard";
+import { isWin, runs, whenPhrase } from "@/lib/outcomes";
+import type { Ladder } from "@contour/core";
 
 
 interface ChainPosition {
@@ -98,6 +100,8 @@ export function PositionScreen({ pubkey }: { pubkey: string }) {
   const view = deskQ.data ?? null;
   const chain = chainQ.data ?? null;
   const quote = view?.quote ?? null;
+  // The market's ladder, for real outcome labels and break-even lines (may be gone after settlement).
+  const ladderQ = useQuery({ queryKey: ["ladder", quote?.ticker], queryFn: () => desk.ladder(quote!.ticker), enabled: !!quote?.ticker, retry: false });
 
   if (chainQ.isLoading || deskQ.isLoading)
     return (
@@ -189,30 +193,26 @@ export function PositionScreen({ pubkey }: { pubkey: string }) {
       </section>
 
       <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <section className="card">
-          <div className="mb-2 flex items-center justify-between">
-            <h2 className="card-title">Locked payout schedule</h2>
-            <span className="text-[14px] text-slate">read from the escrow account</span>
-          </div>
-          <PayoutChart
-            payouts={schedule}
-            stake={stake}
-            hover={hover}
-            onHover={setHover}
-            outcome={outcome}
-            outcomeLabel={outcome !== null && outcome >= 0 ? `Settled · ${usd(schedule[outcome])}` : undefined}
-            bucketLabels={labels}
-            height={260}
-          />
-          <p className="mt-3 h-6 text-[14px] text-slate">{hover !== null ? `${labels[hover]} pays ${usd(schedule[hover])}` : "Hover a bar to see its outcome."}</p>
-        </section>
+        <LockedSchedule
+          schedule={schedule}
+          stake={stake}
+          labels={labels}
+          ladder={ladderQ.data?.ladder && ladderQ.data.ladder.bucketLabels.length === schedule.length ? ladderQ.data.ladder : null}
+          hover={hover}
+          onHover={setHover}
+          outcome={outcome}
+        />
         <ScoreCard view={view} chain={chain} outcome={outcome} schedule={schedule} stake={stake} />
       </div>
 
       {quote && (
-        <div className="mt-6">
-          <FiveNumbers quote={quote.quote} stake={stake} title="The five numbers, as quoted when you opened" />
-        </div>
+        <AsQuoted
+          quote={quote.quote}
+          stake={stake}
+          marketProb={quote.marketProb}
+          belief={quote.preimage?.belief ?? null}
+          ladder={ladderQ.data?.ladder && ladderQ.data.ladder.bucketLabels.length === quote.marketProb.length ? ladderQ.data.ladder : null}
+        />
       )}
 
       <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
@@ -250,6 +250,127 @@ export function PositionScreen({ pubkey }: { pubkey: string }) {
         <ForecastProof view={view} chain={chain} />
       </section>
     </div>
+  );
+}
+
+/** The on-chain schedule as profit and loss per outcome, with the settled outcome ringed. */
+function LockedSchedule({
+  schedule,
+  stake,
+  labels,
+  ladder,
+  hover,
+  onHover,
+  outcome,
+}: {
+  schedule: number[];
+  stake: number;
+  labels: string[];
+  ladder: Ladder | null;
+  hover: number | null;
+  onHover: (j: number | null) => void;
+  outcome: number | null;
+}) {
+  const pl = schedule.map((p) => p - stake);
+  const wins = schedule.map((p) => isWin(p, stake));
+  const settled = outcome !== null && outcome >= 0 && outcome < schedule.length;
+  const focus = hover ?? (settled ? outcome : null);
+  const signedUsd = (n: number) => `${n > 0.004 ? "+" : n < -0.004 ? "−" : ""}${usd(Math.abs(n))}`;
+  return (
+    <section className="card">
+      <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
+        <h2 className="card-title">Locked payout schedule</h2>
+        <span className="text-[14px] text-slate">read from the escrow account</span>
+      </div>
+      <div className="mb-3 min-h-[52px]">
+        {focus !== null ? (
+          <>
+            <p className="text-[14px] text-slate">
+              {settled && hover === null ? "Settled · " : ""}
+              {labels[focus]}
+            </p>
+            <p className={`tnum text-[28px] font-bold leading-tight ${pl[focus] > 0.004 ? "text-gain" : "text-inkstone"}`}>
+              {signedUsd(pl[focus])} <span className="text-[15px] font-medium text-slate">· you get {usd(schedule[focus])} back</span>
+            </p>
+          </>
+        ) : (
+          <p className="text-[14px] text-slate">Point at a bar to see what you&apos;d get back in that outcome.</p>
+        )}
+      </div>
+      <ProfitChart
+        pl={pl}
+        wins={wins}
+        stake={stake}
+        hover={hover}
+        onHover={onHover}
+        cutLabels={ladder?.cutLabels ?? []}
+        bucketLabels={ladder?.bucketLabels ?? labels}
+        height={260}
+        outcome={settled ? outcome : null}
+        outcomeLabel={settled ? `Settled · ${usd(schedule[outcome!])}` : undefined}
+      />
+      <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-1 text-[13px] text-slate">
+        <span className="inline-flex items-center gap-2">
+          <span className="h-3 w-3 rounded-[3px]" style={{ background: GAIN }} /> You make money
+        </span>
+        <span className="inline-flex items-center gap-2">
+          <span className="h-3 w-3 rounded-[3px] bg-ash" /> You get back less
+        </span>
+      </div>
+    </section>
+  );
+}
+
+/** What the position looked like when it was quoted: the same honest numbers as the forecast screen. */
+function AsQuoted({
+  quote,
+  stake,
+  marketProb,
+  belief,
+  ladder,
+}: {
+  quote: Omit<import("@contour/core").Quote, "raw">;
+  stake: number;
+  marketProb: number[];
+  belief: number[] | null;
+  ladder: Ladder | null;
+}) {
+  const wins = quote.payoutByBucket.map((p) => isWin(p, stake));
+  const zones = runs(wins, (w) => w);
+  const chance = marketProb.reduce((s, q, j) => s + (wins[j] ? q : 0), 0);
+  const chanceYou = belief ? belief.reduce((s, q, j) => s + (wins[j] ? q : 0), 0) : null;
+  return (
+    <section className="card mt-6 flex flex-col gap-4">
+      <div>
+        <p className="eyebrow">As quoted when you opened</p>
+        <h2 className="card-title mt-1">What you signed up for</h2>
+      </div>
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+        <Tile
+          label="You paid"
+          value={usd(stake)}
+          sub={quote.feesUsd === undefined ? "quoted before Gemini fees were itemized" : `${usd(quote.feesUsd)} of it in Gemini fees`}
+        />
+        <Tile label="Really at risk" value={usd(stake - quote.minPayout)} sub={`you keep at least ${usd(quote.minPayout)}`} />
+        <Tile label="Best case" value={<span className="text-gain">+{usd(quote.maxPayout - stake)}</span>} sub={`you get ${usd(quote.maxPayout)}`} />
+        <Tile
+          label="Chance of profit"
+          value={pct(chance)}
+          sub={
+            <>
+              {oneIn(chance)} by the market
+              {chanceYou !== null ? (
+                <>
+                  {" "}
+                  · <span className="font-bold text-signal-violet">{pct(chanceYou)}</span> by yours
+                </>
+              ) : null}
+            </>
+          }
+        />
+      </div>
+      <MoneySplit quote={quote} stake={stake} winsWhere={ladder && zones.length ? whenPhrase(ladder, zones) : null} chance={chance} title={`Where your ${usd(stake, 0)} went`} />
+    </section>
   );
 }
 

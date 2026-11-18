@@ -33,6 +33,10 @@ export interface ForecastPreimage {
   confidence: number;
   quoteId: string;
   capturedAt: string;
+  /** Holding strategies only (floor / collar / covered call). Absent keys are skipped, so older hashes are unchanged. */
+  protect?: { units: number; floor?: number; cap?: number };
+  /** Spread quotes only. */
+  spread?: { direction: "up" | "down"; from: number; to: number };
 }
 
 export function forecastHash(pre: ForecastPreimage): string {

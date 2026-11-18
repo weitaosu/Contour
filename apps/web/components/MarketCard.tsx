@@ -221,7 +221,11 @@ export function MarketCard({ m }: { m: MarketSummary }) {
     >
       <div className="flex items-center justify-between gap-3">
         <span className="eyebrow truncate" title={settleLabel(m.expiry)}>Settles {settleShort(m.expiry)}</span>
-        <span className={`tag tnum !py-0.5 !text-[13px] ${soon ? "tag-active" : "tag-white"}`}>{untilLabel(m.expiry)}</span>
+        {m.sample ? (
+          <span className="tag !border !border-dashed !border-ash !bg-transparent !py-0.5 !text-[13px] text-slate">Sample · made-up prices</span>
+        ) : (
+          <span className={`tag tnum !py-0.5 !text-[13px] ${soon ? "tag-active" : "tag-white"}`}>{untilLabel(m.expiry)}</span>
+        )}
       </div>
       <div>
         <h3 className="card-title ease text-inkstone group-hover:text-signal-violet">{m.title}</h3>

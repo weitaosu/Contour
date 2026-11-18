@@ -13,6 +13,7 @@
     "dev:desk": "pnpm --filter @contour/desk dev",
     "dev:web": "pnpm --filter @contour/web dev",
     "recorder": "pnpm --filter @contour/desk recorder",
+    "snapshot": "pnpm --filter @contour/desk snapshot",
     "local:up": "./scripts/local-up.sh",
     "dev:desk:local": "pnpm --filter @contour/desk exec env DOTENV_CONFIG_PATH=.env.localnet tsx watch src/server.ts",
     "dev:web:local": "cd apps/web && sh -c 'set -a; . ./.env.localnet; set +a; exec pnpm exec next dev --port 3000'",

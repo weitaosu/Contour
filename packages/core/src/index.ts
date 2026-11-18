@@ -3,6 +3,8 @@ export * from "./math";
 export * from "./normalize";
 export * from "./beliefs";
 export * from "./compile";
+export * from "./fees";
+export * from "./protect";
 export * from "./score";
 export * from "./hash";
 export * from "./settlement";

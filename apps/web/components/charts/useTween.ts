@@ -50,6 +50,51 @@ export function useTweenedArray(target: readonly number[], speed = 0.2): number[
   return value;
 }
 
+/**
+ * Morphs an array of numbers to a new target on one eased timeline (cubic in-out). Starts from
+ * whatever is on screen, so interrupting a morph never jumps. Pack every animated value of a chart
+ * into one array so bars, scales and axes move in lockstep. Snaps when the length changes or the
+ * user prefers reduced motion.
+ */
+export function useMorph(target: readonly number[], duration = 480): number[] {
+  const [value, setValue] = useState<number[]>(() => [...target]);
+  const cur = useRef<number[]>([...target]);
+  const raf = useRef<number | null>(null);
+  // Keyed on the values, not the array: a parent re-rendering with an equal new array (every second,
+  // for a countdown) must not restart a morph mid-flight.
+  const latest = useRef(target);
+  latest.current = target;
+  const sig = target.map((v) => Math.round(v * 1e6) / 1e6).join(",");
+  useEffect(() => {
+    const target = latest.current;
+    if (cur.current.length !== target.length || reducedMotion()) {
+      cur.current = [...target];
+      setValue([...target]);
+      return;
+    }
+    const from = [...cur.current];
+    if (from.every((v, i) => Math.abs(v - target[i]) < 1e-9)) return;
+    const t0 = performance.now();
+    const ease = (k: number) => (k < 0.5 ? 4 * k * k * k : 1 - Math.pow(-2 * k + 2, 3) / 2);
+    const step = (now: number) => {
+      const k = Math.min(1, Math.max(0, (now - t0) / duration));
+      const e = ease(k);
+      const next = target.map((to, i) => from[i] + (to - from[i]) * e);
+      cur.current = next;
+      setValue(next);
+      if (k < 1) raf.current = requestAnimationFrame(step);
+      else raf.current = null;
+    };
+    if (raf.current) cancelAnimationFrame(raf.current);
+    raf.current = requestAnimationFrame(step);
+    return () => {
+      if (raf.current) cancelAnimationFrame(raf.current);
+      raf.current = null;
+    };
+  }, [sig, duration]);
+  return value;
+}
+
 export function useTweenedNumber(target: number, speed = 0.2): number {
   const arr = useTweenedArray(useStableArray(target), speed);
   return arr[0];

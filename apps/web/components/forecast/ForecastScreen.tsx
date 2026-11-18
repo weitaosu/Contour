@@ -1,48 +1,69 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useRouter } from "next/navigation";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAnchorWallet, useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Transaction } from "@solana/web3.js";
+import { useQuery } from "@tanstack/react-query";
 import {
   compile,
   formatValue,
   fromBars,
   isTradable,
   likelyRange,
-  paysIn,
   marketMoments,
   normalBelief,
+  floorChoices,
+  capChoices,
+  protect,
+  spread,
+  rangeBelief,
+  oddsBelief,
+  underlyingName,
+  paysIn,
   type Ladder,
   type Quote,
 } from "@contour/core";
+import { ChevronDown } from "lucide-react";
 import { desk, type StoredQuote } from "@/lib/desk";
-import { openPositionIx, sendTx, useChainConfig, useDeskConfig, useProgram, useUsdcBalance, useUsdcMint } from "@/lib/chain";
+import { useChainConfig } from "@/lib/chain";
 import { pct, settleLabel, untilLabel, usd } from "@/lib/format";
+import { isWin } from "@/lib/outcomes";
 import { ProbabilityChart } from "@/components/charts/ProbabilityChart";
-import { PayoutChart } from "@/components/charts/PayoutChart";
 import { Slider } from "@/components/ui/Slider";
 import { Switch } from "@/components/ui/Switch";
-import { WalletDialog } from "@/components/WalletButton";
-import { FiveNumbers } from "./FiveNumbers";
-import { ComparisonCard } from "./ComparisonCard";
-import { LegsPanel } from "./LegsPanel";
+import { ProfitCard } from "./ProfitCard";
+import { ProtectCard, ProtectControls } from "./ProtectCard";
+import { MORE_STRATEGIES, MORE_STRATEGIES_ENABLED, type StrategyKey } from "./strategies";
+import { DetailsSection } from "./DetailsSection";
 import { CandidateEditor } from "./CandidateEditor";
+import { OUTLOOKS, OutlookPicker, SPLIT_OFFSET, type Outlook } from "./OutlookPicker";
+import { OutcomeSummary } from "./OutcomeSummary";
+import { ReviewDialog } from "./ReviewDialog";
+import { ConfidenceDialog } from "./ConfidenceDialog";
+import { FrozenBanner, SampleBanner } from "@/components/FrozenBanner";
+import { CHART_MS, liveFill, useLive } from "@/lib/live";
+import { LiveDot, LivePrice, TickNumber, spotText } from "./LivePrice";
+
+/** New positions stop this long before a market settles (matches the desk's CLOSE_BUFFER_MS). */
+const CLOSE_BUFFER_MS = 10 * 60_000;
 
 type ShownQuote = Omit<Quote, "raw"> & { iterations?: number };
 
 // Confidence is a four-step dial. 0 is left out: with no trust in your own forecast there is nothing to trade.
-const CONFIDENCE_LEVELS = [0.25, 0.5, 0.75, 1] as const;
-const CONFIDENCE_NAMES = ["mostly the market", "half and half", "mostly my forecast", "only my forecast"] as const;
-const DEFAULT_CONFIDENCE = 0.25;
-const snapConfidence = (c: number) =>
-  CONFIDENCE_LEVELS.reduce((best, l) => (Math.abs(l - c) < Math.abs(best - c) ? l : best), CONFIDENCE_LEVELS[0]);
+// Confidence = the weight the user's view gets when blended with the market's (see ConfidenceDialog).
+// Three quick levels plus "Other" for any weight; below half rarely clears fees, so it isn't a preset.
+const CONFIDENCE_LEVELS = [0.5, 0.75, 1] as const;
+const CONFIDENCE_NAMES = ["half and half", "mostly my forecast", "only my forecast"] as const;
+const DEFAULT_CONFIDENCE = 0.5;
+const presetIndex = (c: number) => CONFIDENCE_LEVELS.findIndex((l) => Math.abs(l - c) < 1e-9);
+const confidenceName = (c: number) => {
+  const i = presetIndex(c);
+  return i >= 0 ? CONFIDENCE_NAMES[i] : c < 0.5 ? "custom · leaning on the market" : "custom";
+};
 
 export interface Preset { c?: number; w?: number; x?: number; s?: number }
 
 export function ForecastScreen({ ticker, preset = {} }: { ticker: string; preset?: Preset }) {
-  const ladderQ = useQuery({ queryKey: ["ladder", ticker], queryFn: () => desk.ladder(ticker), refetchInterval: 15_000 });
+  // Slow tier: the full ladder (market odds) only refreshes every CHART_MS; live prices come from useLive.
+  const ladderQ = useQuery({ queryKey: ["ladder", ticker], queryFn: () => desk.ladder(ticker), refetchInterval: CHART_MS });
   if (ladderQ.isError)
     return (
       <div className="page py-24">
@@ -62,55 +83,246 @@ export function ForecastScreen({ ticker, preset = {} }: { ticker: string; preset
         </div>
       </div>
     );
-  return <Screen ladder={ladderQ.data.ladder} preset={preset} />;
+  return (
+    <>
+      {ladderQ.data.sample ? (
+        <div className="page pt-6">
+          <SampleBanner />
+        </div>
+      ) : ladderQ.data.frozen ? (
+        <div className="page pt-6">
+          <FrozenBanner at={ladderQ.data.capturedAt} />
+        </div>
+      ) : null}
+      <Screen ladder={ladderQ.data.ladder} preset={preset} offline={!!ladderQ.data.sample || !!ladderQ.data.frozen} />
+    </>
+  );
 }
 
-function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
+function Screen({ ladder, preset, offline }: { ladder: Ladder; preset: Preset; offline: boolean }) {
   const ordered = ladder.cuts !== null;
+  // Fast tier: spot price and current asks every few seconds (nothing to stream for samples or frozen data).
+  const liveQ = useLive(ladder.eventTicker, !offline);
+  const live = offline ? undefined : liveQ.data;
+  const spot = live?.spot ?? null;
   const mkt = useMemo(() => (ordered ? marketMoments(ladder) : { mean: 0, sd: 1 }), [ladder, ordered]);
-  const [center, setCenter] = useState<number>(() => mkt.mean + (preset.x ?? 0) * mkt.sd);
+  // A view drawn or fine-tuned by hand sits at fixed prices (centerState). A picked outlook is relative:
+  // "Higher" means higher than the price now, so its center follows the anchor below.
+  const [centerState, setCenter] = useState<number>(() => mkt.mean + (preset.x ?? 0) * mkt.sd);
   const [range] = useState(() => ({ lo: mkt.mean - 2.5 * mkt.sd, hi: mkt.mean + 2.5 * mkt.sd, sd: mkt.sd }));
+  // What the outlooks are relative to: the live price, re-read on the slow tier (every CHART_MS), so
+  // the view re-centers with the chart refresh rather than on every tick. Without a live price
+  // (commodities, weather, samples), the market's expected price.
+  const [anchor, setAnchor] = useState<number | null>(null);
+  useEffect(() => {
+    if (anchor === null && spot) setAnchor(spot.price);
+  }, [anchor, spot]);
+  const base = anchor ?? mkt.mean;
   const [scale, setScale] = useState(() => Math.min(1.6, Math.max(0.4, preset.w ?? 1)));
   const [edit, setEdit] = useState(!ordered);
   const [bars, setBars] = useState<number[] | null>(ordered ? null : ladder.marketProb);
   const [draft, setDraft] = useState<number[] | null>(null);
-  const [confidence, setConfidence] = useState<number>(() => snapConfidence(preset.c ?? DEFAULT_CONFIDENCE));
+  // Named-outcome markets: your take on each outcome as an odds multiplier against the market's
+  // (1 = same as the market), so your view moves with the market like the price outlooks do.
+  const [oddsW, setOddsW] = useState<number[]>(() => ladder.marketProb.map(() => 1));
+  const takes = oddsW.length === ladder.marketProb.length ? oddsW : ladder.marketProb.map(() => 1);
+  const [confidence, setConfidence] = useState<number>(() => Math.min(1, Math.max(0.05, preset.c ?? DEFAULT_CONFIDENCE)));
+  const [customOpen, setCustomOpen] = useState(false);
   const [stake, setStake] = useState(() => (preset.s && preset.s > 0 ? preset.s : 100));
   const [hover, setHover] = useState<number | null>(null);
+  // The picked outlook; null once the user fine-tunes, drags or draws their own view.
+  const [outlook, setOutlook] = useState<Outlook | null>(null);
+  // Two humps either side of the center (the "Big move" outlook) instead of one bell.
+  const [split, setSplit] = useState(false);
+  // Whether the user has expressed any view yet (a preset link counts).
+  const [started, setStarted] = useState(() => preset.x !== undefined || preset.w !== undefined);
+  const [tuneOpen, setTuneOpen] = useState(false);
+  const [reviewOpen, setReviewOpen] = useState(false);
+  const custom = () => {
+    // Freeze a relative outlook at the prices it shows right now before the user reshapes it.
+    setCenter(center);
+    setOutlook(null);
+    setStarted(true);
+    // Reshaping the curve by hand leaves Range for a free-form view (protection has no curve to touch).
+    setStrategy((s) => (s === "range" ? "outlook" : s));
+  };
 
   const chainCfg = useChainConfig();
   const maxStake = chainCfg.data?.maxStake ?? 500;
   const dragStart = useRef<{ center: number; scale: number } | null>(null);
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
+  // "Protect what I hold": price ladders only. The floor defaults to about half a market spread below
+  // the expected price, a typical "protect against a meaningful drop" choice.
+  const canProtect = ladder.kind === "threshold";
+  const floors = useMemo(() => floorChoices(ladder), [ladder]);
+  const name = useMemo(() => underlyingName(ladder), [ladder]);
+  // What the user is doing: an everyday outlook (the default), protecting a holding, or one of the
+  // "More strategies" (range, collar). Each picks how the position is built.
+  const [strategy, setStrategy] = useState<"outlook" | "protect" | StrategyKey>("outlook");
+  const moreItems = useMemo(() => (MORE_STRATEGIES_ENABLED ? MORE_STRATEGIES.filter((s) => s.available(ladder)) : []), [ladder]);
+  const nearest = (xs: number[], target: number) => (xs.length ? xs.reduce((a, b) => (Math.abs(b - target) < Math.abs(a - target) ? b : a)) : 0);
+  const [units, setUnits] = useState(10);
+  const [floor, setFloor] = useState<number>(() => nearest(floors, mkt.mean - 0.5 * mkt.sd));
+  const caps = useMemo(() => capChoices(ladder), [ladder]);
+  const [cap, setCap] = useState<number>(() => nearest(caps, mkt.mean + 0.75 * mkt.sd));
+  // The "holding" family: protect (floor), collar (floor + cap), covered call (cap only). They all
+  // value the user's holding and are built from NO contracts by protect().
+  const covering = strategy === "covered" && canProtect && caps.length > 0;
+  const protecting = ((strategy === "protect" || strategy === "collar") && canProtect && floors.length > 0) || covering;
+  const collaring = protecting && strategy === "collar" && caps.length > 0;
+  const protectQuote = useMemo(() => {
+    if (!protecting) return null;
+    try {
+      return covering ? protect({ ladder, units, cap }) : protect({ ladder, units, floor, cap: collaring ? cap : undefined });
+    } catch {
+      return null;
+    }
+  }, [protecting, covering, collaring, ladder, units, floor, cap]);
+
+  // Spread: equal steps from one price to another, up (call spread) or down (put spread).
+  const strikes = ladder.strikes;
+  const centerIdx = useMemo(() => (strikes.length ? strikes.indexOf(nearest(strikes, mkt.mean)) : 0), [strikes, mkt.mean]); // eslint-disable-line react-hooks/exhaustive-deps
+  const [spreadDir, setSpreadDir] = useState<"up" | "down">("up");
+  const [spreadIdx, setSpreadIdx] = useState<[number, number]>(() => [centerIdx, Math.min(strikes.length - 1, centerIdx + 4)]);
+  const setDirection = (d: "up" | "down") => {
+    setSpreadDir(d);
+    setSpreadIdx(d === "up" ? [centerIdx, Math.min(strikes.length - 1, centerIdx + 4)] : [Math.max(0, centerIdx - 4), centerIdx]);
+  };
+  const spreading = strategy === "spread" && ladder.kind === "threshold" && strikes.length >= 3;
+  const spreadQuote = useMemo(() => {
+    if (!spreading) return null;
+    try {
+      return spread({ ladder, direction: spreadDir, from: strikes[spreadIdx[0]], to: strikes[spreadIdx[1]], stakeUsd: Math.max(1, stake) });
+    } catch {
+      return null;
+    }
+  }, [spreading, ladder, spreadDir, strikes, spreadIdx, stake]);
+  // The floor alone, to show what the collar's cap saves.
+  const floorAloneCost = useMemo(() => {
+    if (!collaring) return null;
+    try {
+      return protect({ ladder, units, floor }).stakeBase / 1e6;
+    } catch {
+      return null;
+    }
+  }, [collaring, ladder, units, floor]);
+
+  // Range: "it'll land between two prices" (cut indexes into ladder.cuts; outcomes lo+1..hi are inside).
+  const [rangeCuts, setRangeCuts] = useState<[number, number]>(() => {
+    const n = ladder.cuts?.length ?? 0;
+    if (!n) return [0, 0];
+    const [a, b] = likelyRange(ladder.marketProb, 0.5);
+    return [Math.max(0, a - 1), Math.min(n - 1, Math.max(a, b))];
+  });
+  const ranging = strategy === "range" && ordered;
+  const pickStrategy = (k: StrategyKey) => {
+    setStrategy(k);
+    if (k === "range" || k === "spread") {
+      setOutlook(null);
+      setEdit(false);
+      setDraft(null);
+      setStarted(true);
+    }
+  };
+
+  const pickOutlook = (k: Outlook) => {
+    setStrategy("outlook");
+    const o = OUTLOOKS.find((x) => x.key === k)!;
+    // Re-read the live price at the moment of the pick, so the view starts from exactly what's shown.
+    const at = spot?.price ?? base;
+    if (spot) setAnchor(spot.price);
+    setCenter(clamp(at + o.x * range.sd, range.lo, range.hi));
+    setScale(o.w);
+    setSplit(!!o.split);
+    setEdit(false);
+    setDraft(null);
+    setOutlook(k);
+    setStarted(true);
+  };
+
+  const picked = outlook && strategy === "outlook" ? OUTLOOKS.find((o) => o.key === outlook)! : null;
+  const center = picked ? clamp(base + picked.x * range.sd, range.lo, range.hi) : centerState;
 
   // The user's (unblended) belief.
   const belief = useMemo(() => {
+    if (ranging) return rangeBelief(ladder, rangeCuts[0] + 1, rangeCuts[1]);
+    if (!ordered) return oddsBelief(ladder.marketProb, takes);
     if (edit && (draft || bars)) return fromBars(draft ?? bars!);
-    if (!ordered) return ladder.marketProb;
+    if (split) {
+      const lo = normalBelief(ladder, center - SPLIT_OFFSET * range.sd, range.sd * scale);
+      const hi = normalBelief(ladder, center + SPLIT_OFFSET * range.sd, range.sd * scale);
+      return lo.map((p, j) => (p + hi[j]) / 2);
+    }
     return normalBelief(ladder, center, range.sd * scale);
-  }, [edit, draft, bars, ordered, ladder, center, range.sd, scale]);
+  }, [ranging, rangeCuts, edit, draft, bars, ordered, ladder, center, range.sd, scale, split, takes]);
 
   // Instant in-browser preview (warm-started solver).
   const warm = useRef<number[] | undefined>(undefined);
-  const preview = useMemo(() => {
+  const viewPreview = useMemo(() => {
     const q = compile({ ladder, belief, confidence, stakeUsd: Math.max(1, stake), warmStart: warm.current, maxIter: 20_000 });
     warm.current = q.raw.weights;
     return q;
   }, [ladder, belief, confidence, stake]);
+  const preview: Omit<Quote, "raw"> & { raw?: Quote["raw"] } = protectQuote ?? spreadQuote ?? viewPreview;
+  // In protect mode the amount isn't chosen: it's what the protection costs.
+  // What the request asks for; the amount shown comes from the displayed quote (see payStake below).
+  const previewStake = protectQuote ? protectQuote.stakeBase / 1e6 : stake;
 
   // Server quote: debounced 150 ms, refreshed every 15 s while idle.
-  const key = useMemo(() => JSON.stringify([ladder.eventTicker, belief, confidence, stake]), [ladder.eventTicker, belief, confidence, stake]);
-  const [server, setServer] = useState<{ key: string; data: StoredQuote; at: number } | null>(null);
+  const key = useMemo(
+    () =>
+      JSON.stringify(
+        protecting
+          ? [ladder.eventTicker, "protect", units, covering ? null : floor, collaring || covering ? cap : null]
+          : spreading
+            ? [ladder.eventTicker, "spread", spreadDir, spreadIdx, stake]
+            : [ladder.eventTicker, belief, confidence, stake],
+      ),
+    [protecting, covering, collaring, cap, spreading, spreadDir, spreadIdx, ladder.eventTicker, units, floor, belief, confidence, stake],
+  );
+  // The same request minus the anchor: a picked outlook re-centering on the live price is the same
+  // view, so the last desk quote stays on screen (no flash back to the preview) until the new one lands.
+  const sticky = useMemo(
+    () =>
+      !ordered
+        ? JSON.stringify([ladder.eventTicker, "odds", takes, confidence, stake])
+        : picked && !edit && !protecting && !spreading
+          ? JSON.stringify([ladder.eventTicker, "outlook", picked.key, scale, split, confidence, stake])
+          : key,
+    [ordered, takes, picked, edit, protecting, spreading, ladder.eventTicker, scale, split, confidence, stake, key],
+  );
+  const [server, setServer] = useState<{ key: string; sticky: string; data: StoredQuote; at: number } | null>(null);
   const [quoteErr, setQuoteErr] = useState<string | null>(null);
   const [tick, setTick] = useState(0);
+  // Slow tier: each refresh re-reads the live price the outlooks are relative to.
   useEffect(() => {
-    if (draft || !(stake > 0)) return;
+    if (tick > 0 && spot) setAnchor(spot.price);
+  }, [tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    if (draft || !(previewStake > 0)) return;
     const ac = new AbortController();
+    const body = protecting
+      ? {
+          ticker: ladder.eventTicker,
+          belief: ladder.marketProb,
+          confidence: 0,
+          stakeUsd: previewStake,
+          protect: covering ? { units, cap } : { units, floor, ...(collaring ? { cap } : {}) },
+        }
+      : spreading
+        ? {
+            ticker: ladder.eventTicker,
+            belief: ladder.marketProb,
+            confidence: 0,
+            stakeUsd: stake,
+            spread: { direction: spreadDir, from: strikes[spreadIdx[0]], to: strikes[spreadIdx[1]] },
+          }
+        : { ticker: ladder.eventTicker, belief, confidence, stakeUsd: stake };
     const t = setTimeout(() => {
       desk
-        .quote({ ticker: ladder.eventTicker, belief, confidence, stakeUsd: stake }, ac.signal)
+        .quote(body, ac.signal)
         .then((data) => {
-          setServer({ key, data, at: Date.now() });
+          setServer({ key, sticky, data, at: Date.now() });
           setQuoteErr(null);
         })
         .catch((e: Error) => e.name !== "AbortError" && setQuoteErr(e.message));
@@ -120,8 +332,9 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
       ac.abort();
     };
   }, [key, draft, tick]); // eslint-disable-line react-hooks/exhaustive-deps
+  // Slow tier: the desk re-solves the position every CHART_MS (sooner if live prices move a lot, below).
   useEffect(() => {
-    const i = setInterval(() => setTick((x) => x + 1), 15_000);
+    const i = setInterval(() => setTick((x) => x + 1), CHART_MS);
     return () => clearInterval(i);
   }, []);
   const [now, setNow] = useState(Date.now());
@@ -130,21 +343,72 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
     return () => clearInterval(i);
   }, []);
 
-  const serverFresh = server && server.key === key && now - server.at < 20_000 ? server : null;
+  // The last desk quote for these inputs stays on screen until the next one lands, so a routine
+  // refresh never flashes back to the in-browser preview.
+  const serverFresh = server && (server.key === key || server.sticky === sticky) && now - server.at < 3 * CHART_MS ? server : null;
+  // The latest quote: what the order ticket re-prices live and what the review signs.
   const shown: ShownQuote = serverFresh ? serverFresh.data.quote : preview;
+  // What the charts and summaries draw. A refresh whose payouts barely moved keeps the previous
+  // picture, so the expensive parts of the screen only change when the position really changes.
+  const steady = useRef<{ key: string; q: ShownQuote; server: boolean; at: number | null } | null>(null);
+  const prevSteady = steady.current;
+  const display: ShownQuote = (() => {
+    if (!prevSteady || prevSteady.key !== sticky || !prevSteady.server || !serverFresh || prevSteady.q === shown) return shown;
+    const tol = Math.max(0.25, stake * 0.005);
+    const a = prevSteady.q.payoutByBucket;
+    const b = shown.payoutByBucket;
+    return a.length === b.length && a.every((p, j) => Math.abs(p - b[j]) < tol) ? prevSteady.q : shown;
+  })();
+  const displayAt = display === prevSteady?.q && display !== shown ? prevSteady.at : serverFresh?.at ?? null;
+  useEffect(() => {
+    steady.current = { key: sticky, q: display, server: !!serverFresh, at: displayAt };
+  });
+  // Fast tier: the same contracts at the live asks, like a brokerage ticket's estimated cost.
+  const fill = useMemo(() => liveFill(shown, live), [shown, live]);
+  // Prices moved a lot since the last solve (or a contract lost its quote): re-solve now, at most every 8 s.
+  const lastEarly = useRef(0);
+  useEffect(() => {
+    if (!fill) return;
+    const moved = Math.abs(fill.delta) >= Math.max(0.5, stake * 0.01) || fill.missing > 0;
+    if (moved && Date.now() - lastEarly.current > 8_000) {
+      lastEarly.current = Date.now();
+      setTick((x) => x + 1);
+    }
+  }, [fill, stake]);
+  const closesIn = new Date(ladder.expiry).getTime() - now;
+  const closed = !offline && closesIn < CLOSE_BUFFER_MS;
   const noEdge = shown.advice === "no_edge";
+  // Every number on screen comes from the displayed quote (the desk's when fresh, else the preview),
+  // so live price moves between the two can never leave the card, panel and review disagreeing.
+  const payStake = protecting ? shown.stakeBase / 1e6 : stake;
+  // With a cap: what comes back if the price ends below it (and above the floor), from the shown quote.
+  const shownBack = useMemo(() => {
+    const p = protectQuote?.protection;
+    if (!p || p.cap === null) return null;
+    const j = p.holdingChange.findIndex((h) => {
+      const m = h / p.units + p.reference;
+      return m > (p.floor ?? -Infinity) && m < p.cap!;
+    });
+    return j >= 0 ? shown.payoutByBucket[j] : null;
+  }, [protectQuote, shown]);
+  // When the view is too weak to trade, the lowest confidence level that would make it tradable.
+  const raiseTo = useMemo(() => {
+    if (protecting || !noEdge || !started) return null;
+    for (const c of CONFIDENCE_LEVELS) {
+      if (c <= confidence) continue;
+      if (compile({ ladder, belief, confidence: c, stakeUsd: Math.max(1, stake), maxIter: 8_000 }).advice === "trade") return c;
+    }
+    return null;
+  }, [protecting, noEdge, started, ladder, belief, confidence, stake]);
 
-  // What the single best contract for the same view would pay in each outcome, for the overlay.
+  // What the single best contract for the same view would pay in each outcome.
   const compare = useMemo(() => {
-    const c = shown.comparison;
+    const c = display.comparison;
     if (!c) return null;
     const i = ladder.instruments.findIndex((x) => x.symbol === c.symbol);
     if (i < 0) return null;
     return ladder.marketProb.map((_, j) => (paysIn(ladder, i, c.side, j) ? c.payoutIfWin : 0));
-  }, [shown.comparison, ladder]);
-  const coveredContour = shown.payoutByBucket.filter((p) => p > 0.005).length;
-  const profitContour = shown.payoutByBucket.filter((p) => p > stake + 1e-9).length;
-  const coveredSingle = compare ? compare.filter((p) => p > 0).length : 0;
+  }, [display.comparison, ladder]);
 
   // Chart decorations.
   const untraded = ladder.kind === "threshold" ? ladder.instruments.map((_, i) => i).filter((i) => !isTradable(ladder, i)).map((i) => ({ cut: i, reason: ladder.crossed[i] ? "quotes crossed" : "no two-sided quote" })) : [];
@@ -158,27 +422,124 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
   }, [ladder, ordered]);
 
   const round = (v: number) => (Math.abs(v) >= 1000 ? Math.round(v) : Math.round(v * 100) / 100);
-  const fmtCenter = formatValue(round(center), ladder.unit);
-  const widthLabel = formatValue(round(range.sd * scale), ladder.unit);
+  // Dollar amounts with cents always show two decimals ($65.50, not $65.5).
+  const fmt = (v: number) => {
+    const r = round(v);
+    if (ladder.unit.prefix === "$" && Math.abs(r) < 1000 && !Number.isInteger(r))
+      return `$${r.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${ladder.unit.suffix}`;
+    return formatValue(r, ladder.unit);
+  };
+  const fmtCenter = fmt(center);
+  const width = range.sd * scale;
+  const widthLabel = fmt(width);
+  // The view in plain terms. One bell: a 2-in-3 likely range (center ± one standard deviation).
+  // Big move: two humps either side of the midpoint, each with its own ± width.
+  const humps = split ? ([center - SPLIT_OFFSET * range.sd, center + SPLIT_OFFSET * range.sd] as const) : null;
+  const likelyText = humps ? `near ${fmt(humps[0])} or ${fmt(humps[1])}` : `likely ${fmt(center - width)}–${fmt(center + width)}`;
+  const viewName = outlook ? OUTLOOKS.find((o) => o.key === outlook)!.title : started ? "Your own view" : "Market's view";
+  const unitsText = units.toLocaleString("en-US", { maximumFractionDigits: 4 });
+  const rangeLo = ladder.cuts ? ladder.cuts[rangeCuts[0]] : 0;
+  const rangeHi = ladder.cuts ? ladder.cuts[rangeCuts[1]] : 0;
+  const spreadFrom = strikes[spreadIdx[0]] ?? 0;
+  const spreadTo = strikes[spreadIdx[1]] ?? 0;
+  const spreadText =
+    spreadQuote && spreadQuote.spread.steps
+      ? spreadDir === "up"
+        ? `${usd(spreadQuote.spread.perStep)} for each full $1 it ends above ${fmt(spreadFrom)}, up to ${usd(spreadQuote.spread.perStep * spreadQuote.spread.steps)} at ${fmt(spreadTo)} or higher`
+        : `${usd(spreadQuote.spread.perStep)} for each full $1 it ends below ${fmt(spreadTo)}, up to ${usd(spreadQuote.spread.perStep * spreadQuote.spread.steps)} at ${fmt(spreadFrom)} or lower`
+      : "";
+  const viewLabel = covering
+    ? `Covered call ${unitsText} ${name} · cap ${fmt(cap)}`
+    : collaring
+    ? `Collar ${unitsText} ${name} · floor ${fmt(floor)} · cap ${fmt(cap)}`
+    : protecting
+    ? `Protect ${unitsText} ${name} below ${fmt(floor)}`
+    : spreading
+    ? `Spread ${spreadDir === "up" ? "up" : "down"} · ${fmt(spreadDir === "up" ? spreadFrom : spreadTo)} → ${fmt(spreadDir === "up" ? spreadTo : spreadFrom)}`
+    : ranging
+    ? `Range · between ${fmt(rangeLo)} and ${fmt(rangeHi)}`
+    : ordered
+      ? humps
+        ? `${viewName} · most likely near ${fmt(humps[0])} or ${fmt(humps[1])}`
+        : `${viewName} · 2 in 3 chance between ${fmt(center - width)} and ${fmt(center + width)}`
+      : "Your own odds";
+  const tooBig = protecting && payStake > maxStake;
+  const tradable =
+    !closed &&
+    (protecting
+      ? !!protectQuote && protectQuote.legs.length > 0 && !tooBig
+      : spreading
+        ? !!spreadQuote && spreadQuote.legs.length > 0
+        : started && !noEdge);
+  const wins = display.payoutByBucket.map((p) => isWin(p, payStake));
+  const chanceMkt = ladder.marketProb.reduce((s, p, j) => s + (wins[j] ? p : 0), 0);
+  // Live ticket numbers: the latest quote's contracts at the current asks (falls back to the quote).
+  const getBack = fill ? { min: fill.minPayout, max: fill.maxPayout } : { min: shown.minPayout, max: shown.maxPayout };
+  // On the chart, big prices read in whole dollars ($64,674); the header keeps the cents.
+  const nowMark =
+    spot && ladder.kind === "threshold"
+      ? { value: spot.price, label: spot.price >= 1000 ? `$${Math.round(spot.price).toLocaleString("en-US")}` : spotText(spot.price) }
+      : null;
+  const asOf = displayAt ? new Date(displayAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" }) : null;
+  const openReview = () => {
+    setTick((x) => x + 1); // sign against a quote taken now, not one up to 30 s old
+    setReviewOpen(true);
+  };
 
   return (
     <div className="page pb-24 pt-10 md:pt-14 lg:pb-8">
-      <a href="#controls" className="fixed inset-x-4 bottom-4 z-20 flex items-center justify-between rounded-full bg-inkstone px-6 py-3 text-porcelain lg:hidden">
-        <span className="tnum text-[14px]">
-          {usd(shown.minPayout, 0)} – {usd(shown.maxPayout, 0)} · {pct(shown.probProfitBelief)} if right
-        </span>
-        <span className="font-bold">Set forecast ↓</span>
-      </a>
+      {/* Phone order bar: always one tap from the next step, like a brokerage app's trade button. */}
+      <div className="fixed inset-x-3 bottom-3 z-20 flex items-center justify-between gap-3 rounded-full bg-inkstone py-2 pl-5 pr-2 text-porcelain shadow-xl lg:hidden">
+        {tradable ? (
+          <>
+            <span className="tnum min-w-0 text-[14px] leading-tight">
+              <span className="block font-bold">
+                {covering ? `Covered call ${usd(payStake)}` : protecting ? `Protection ${usd(payStake + (fill?.delta ?? 0))}` : `You pay ${usd(stake, 0)}`}
+              </span>
+              <span className="block text-ash">
+                {covering && shownBack !== null
+                  ? `earns ${usd(shownBack - payStake)} below ${fmt(cap)}`
+                  : protecting
+                    ? `pays up to ${usd(shown.maxPayout, 0)} below ${fmt(floor)}`
+                    : `get back ${usd(getBack.min, 0)}–${usd(getBack.max, 0)}`}
+              </span>
+            </span>
+            <button type="button" className="btn btn-primary shrink-0 !px-5 !py-2.5" onClick={openReview}>
+              {protecting ? "Review" : "Review hedge"}
+            </button>
+          </>
+        ) : (
+          <>
+            <span className="min-w-0 text-[14px] leading-tight">
+              {closed
+                ? "Closed for new positions"
+                : protecting
+                  ? tooBig
+                    ? "Over the per-position limit"
+                    : "Adjust your protection"
+                  : !started
+                    ? ordered
+                      ? "Start with your outlook"
+                      : "Start with your odds"
+                    : "Too close to the market to trade"}
+            </span>
+            <a href={!started && !protecting ? "#outlook" : "#controls"} className="btn btn-quiet shrink-0 !px-5 !py-2.5">
+              {!started && !protecting ? "Pick one ↑" : "Adjust ↓"}
+            </a>
+          </>
+        )}
+      </div>
       <header className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
         <div className="min-w-0">
           <p className="eyebrow">
             {ladder.category} · Settles {settleLabel(ladder.expiry)} · {untilLabel(ladder.expiry, now)}
           </p>
           <h1 className="title mt-2">{ladder.title}</h1>
+          {spot && <LivePrice spot={spot} name={name || ladder.eventTicker.replace(/\d.*$/, "")} />}
           {!ordered && (
             <p className="mt-3 max-w-2xl text-slate">
-              One candidate wins. Contour buys more of the candidates you rate above the market and less of the rest, so you get paid in proportion to how right
-              you were instead of betting everything on one name.
+              Exactly one outcome wins. Contour buys more of the outcomes you rate above the market and less of the rest, so you get paid in proportion to how right
+              you were instead of betting everything on one outcome.
             </p>
           )}
         </div>
@@ -190,10 +551,72 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
       </header>
 
       <div className="mt-8 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="flex min-w-0 flex-col gap-6">
-          <section className="card">
+        {/* On phones this column dissolves into the grid so the order panel can sit right after the profit card. */}
+        <div className="flex min-w-0 flex-col gap-6 max-lg:contents">
+          <div id="outlook" className="min-w-0 scroll-mt-24 max-lg:order-1">
+            {ordered && (
+              <OutlookPicker
+                value={protecting ? null : outlook}
+                onPick={pickOutlook}
+                center={spot ? spotText(spot.price) : formatValue(round(mkt.mean), ladder.unit)}
+                expected={fmt(mkt.mean)}
+                live={!!spot}
+                protect={canProtect && floors.length ? { on: strategy === "protect", name, onClick: () => setStrategy(strategy === "protect" ? "outlook" : "protect") } : undefined}
+                more={{ items: moreItems, active: strategy === "outlook" || strategy === "protect" ? null : strategy, onPick: pickStrategy }}
+              />
+            )}
+            {!ordered && (
+              <CandidateEditor
+                labels={ladder.bucketLabels}
+                market={ladder.marketProb}
+                weights={takes}
+                belief={belief}
+                payouts={display.payoutByBucket}
+                stake={stake}
+                onChange={(w) => {
+                  custom();
+                  setOddsW(w);
+                }}
+                hover={hover}
+                onHover={setHover}
+              />
+            )}
+          </div>
+          <div className="min-w-0 max-lg:order-2">
+            {protecting && protectQuote ? (
+              <ProtectCard
+                ladder={ladder}
+                quote={display}
+                protection={protectQuote.protection}
+                name={name}
+                source={serverFresh ? "desk quote" : "preview"}
+                floorAloneCost={floorAloneCost}
+              />
+            ) : !spreading && (!started || noEdge) ? (
+              <OutcomeSummary ordered={ordered} started={started} raiseTo={raiseTo} onRaise={() => raiseTo !== null && setConfidence(raiseTo)} />
+            ) : (
+              <ProfitCard
+                ladder={ladder}
+                quote={display}
+                stake={stake}
+                belief={spreading ? null : belief}
+                note={spreading && spreadText ? `This spread pays ${spreadText}.` : undefined}
+                hover={hover}
+                onHover={setHover}
+                likely={likely}
+                source={serverFresh ? "desk quote" : "preview"}
+                now={nowMark}
+                asOf={asOf}
+              />
+            )}
+          </div>
+          {/* Named outcomes: the ranked odds list above is this chart, readable at any number of outcomes. */}
+          <section className={`card min-w-0 max-lg:order-4 ${protecting || spreading || !ordered ? "hidden" : ""}`}>
             <div className="flex flex-wrap items-center justify-between gap-3">
-              <h2 className="card-title">{ordered ? "Probability by outcome" : "Chance of winning, by candidate"}</h2>
+              <div>
+                <h2 className="card-title">{ordered ? "Your view vs the market" : "Chance of winning, by outcome"}</h2>
+                {ordered && <p className="text-[14px] text-slate">Drag the violet curve to reshape your view, or switch on Edit by hand to draw it.</p>}
+              </div>
               <div className="flex items-center gap-5 text-[14px] text-slate">
                 <span className="inline-flex items-center gap-2">
                   <span className="h-3 w-3 rounded-[3px] bg-mist ring-1 ring-smoke" /> Market
@@ -218,6 +641,7 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
                         onMove: (dv, dy) => {
                           const st = dragStart.current;
                           if (!st) return;
+                          custom();
                           setCenter(clamp(st.center + dv, range.lo, range.hi));
                           setScale(Math.round(clamp(st.scale * Math.exp(dy / 160), 0.4, 1.6) * 100) / 100);
                         },
@@ -232,6 +656,7 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
                 editable={edit}
                 onDraft={setDraft}
                 onCommit={(v) => {
+                  custom();
                   setBars(fromBars(v));
                   setDraft(null);
                 }}
@@ -245,80 +670,108 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
                       You <span className="tnum text-signal-violet">{pct(belief[j], 1)}</span>
                     </span>
                     <span className="flex justify-between text-slate">
-                      Pays <span className="tnum text-inkstone">{usd(shown.payoutByBucket[j])}</span>
+                      Pays <span className="tnum text-inkstone">{usd(display.payoutByBucket[j])}</span>
                     </span>
                   </div>
                 )}
               />
             </div>
-            <div className="mt-6 border-t border-mist pt-6">
-              <div className="mb-1 flex flex-wrap items-center justify-between gap-3">
-                <h2 className="card-title">Payout per outcome</h2>
-                <div className="flex items-center gap-4 text-[14px] text-slate">
-                  <span className="inline-flex items-center gap-2">
-                    <span className="h-3 w-3 rounded-[3px] bg-signal-violet" /> Contour position
-                  </span>
-                  {compare && (
-                    <span className="inline-flex items-center gap-2">
-                      <span className="h-3 w-1.5 rounded-[2px] bg-smoke" /> One contract, same ${stake.toLocaleString("en-US")}
-                    </span>
-                  )}
-                  <span className="text-smoke">· {serverFresh ? "desk quote" : "preview"}</span>
-                </div>
-              </div>
-              {compare && !noEdge && (
-                <p className="mb-2 text-[14px] text-slate">
-                  Contour pays back something in <b className="tnum text-signal-violet">{coveredContour} of {ladder.marketProb.length}</b> outcomes and
-                  profits in <b className="tnum text-signal-violet">{profitContour}</b>. The single best contract pays in{" "}
-                  <b className="tnum text-inkstone">{coveredSingle}</b> and loses everything in the other {ladder.marketProb.length - coveredSingle}.
-                </p>
-              )}
-              <PayoutChart payouts={shown.payoutByBucket} stake={stake} hover={hover} onHover={setHover} bucketLabels={ladder.bucketLabels} compare={noEdge ? null : compare} />
-            </div>
           </section>
 
-          {!ordered && (
-            <CandidateEditor
-              labels={ladder.bucketLabels}
-              market={ladder.marketProb}
-              belief={belief}
-              payouts={shown.payoutByBucket}
-              stake={stake}
-              onChange={(b) => setBars(b)}
-            />
+          {tradable && (
+            <div className="min-w-0 max-lg:order-5">
+              <DetailsSection
+                quote={display}
+                stake={payStake}
+                compare={protecting ? null : compare}
+                crossed={serverFresh?.data.crossedStrikes ?? ladder.instruments.filter((_, i) => ladder.crossed[i]).map((i) => i.label)}
+              />
+            </div>
           )}
-
-          <FiveNumbers quote={shown} stake={stake} />
-
-          <div className="flex flex-col gap-6">
-            <ComparisonCard quote={shown} stake={stake} />
-            <LegsPanel quote={shown} paper={true} crossed={serverFresh?.data.crossedStrikes ?? ladder.instruments.filter((_, i) => ladder.crossed[i]).map((i) => i.label)} />
-          </div>
         </div>
 
-        <aside id="controls" className="card flex min-w-0 flex-col gap-7 lg:sticky lg:top-[96px]">
+        <aside id="controls" className="card flex min-w-0 scroll-mt-24 flex-col gap-7 max-lg:order-3 lg:sticky lg:top-[96px]">
           <div>
-            <p className="eyebrow">Your forecast</p>
-            <p className="mt-1 text-slate">
-              {ordered ? "Where do you think it lands, and how sure are you? Drag the curve or use the sliders." : "Set your odds in the candidate list, or drag the violet bars on the chart."}
-            </p>
+            <p className="eyebrow">Step 2 · Your order</p>
+            <h2 className="card-title mt-1">
+              {covering
+                ? "Set up your covered call"
+                : collaring
+                  ? "Set up your collar"
+                  : protecting
+                    ? "Set up your protection"
+                    : spreading
+                      ? "Set up your spread"
+                      : ranging
+                        ? "Set up your range"
+                        : "Set up your hedge"}
+            </h2>
           </div>
-          {ordered && (
-            <>
+          {protecting && (
+            <ProtectControls
+              name={name}
+              units={units}
+              setUnits={setUnits}
+              floors={covering ? [] : floors}
+              floor={floor}
+              setFloor={setFloor}
+              unit={ladder.unit}
+              cap={collaring || covering ? { caps, value: cap, set: setCap, income: covering } : undefined}
+            />
+          )}
+          {ranging && ladder.cuts && (
+            <RangeControls cuts={ladder.cuts} labels={ladder.cutLabels} value={rangeCuts} onChange={setRangeCuts} />
+          )}
+          {spreading && (
+            <SpreadControls
+              strikes={strikes}
+              unit={ladder.unit}
+              direction={spreadDir}
+              setDirection={setDirection}
+              value={spreadIdx}
+              onChange={setSpreadIdx}
+              summary={spreadText}
+            />
+          )}
+          {ordered && !protecting && !ranging && !spreading && (
+            <div className="flex flex-col gap-6">
+              <button
+                type="button"
+                aria-expanded={tuneOpen}
+                aria-controls="fine-tune"
+                onClick={() => setTuneOpen((o) => !o)}
+                className="ease -mx-2 flex items-center justify-between rounded-[14px] px-2 py-2 text-left hover:bg-porcelain"
+              >
+                <span>
+                  <span className="block font-bold text-inkstone">Fine-tune your view</span>
+                  <span className="tnum block text-[14px] text-slate">
+                    {viewName} · {likelyText}
+                  </span>
+                </span>
+                <ChevronDown size={20} strokeWidth={1.75} className={`ease shrink-0 text-inkstone ${tuneOpen ? "rotate-180" : ""}`} aria-hidden="true" />
+              </button>
+              {tuneOpen && (
+              <div id="fine-tune" className="fade-up flex flex-col gap-6">
               <Slider
-                label="Where"
+                label={humps ? "Midpoint" : "Where"}
                 value={center}
                 min={range.lo}
                 max={range.hi}
                 step={range.sd / 100}
                 onChange={(v) => {
+                  custom();
                   setCenter(v);
                   setEdit(false);
                 }}
                 display={fmtCenter}
-                valueText={`Center ${fmtCenter}`}
+                valueText={humps ? `Midpoint ${fmtCenter}, humps near ${fmt(humps[0])} and ${fmt(humps[1])}` : `Center ${fmtCenter}`}
                 ends={[formatValue(Math.round(range.lo), ladder.unit), formatValue(Math.round(range.hi), ladder.unit)]}
               />
+              {humps && (
+                <p className="-mt-3 text-[13px] text-slate">
+                  Moves both humps together. They stay {fmt(2 * SPLIT_OFFSET * range.sd)} apart, at {fmt(humps[0])} and {fmt(humps[1])}.
+                </p>
+              )}
               <Slider
                 label="How sure"
                 value={2 - scale}
@@ -326,56 +779,482 @@ function Screen({ ladder, preset }: { ladder: Ladder; preset: Preset }) {
                 max={1.6}
                 step={0.01}
                 onChange={(v) => {
+                  custom();
                   setScale(Math.round((2 - v) * 100) / 100);
                   setEdit(false);
                 }}
-                display={`±${widthLabel}`}
-                valueText={`Spread ${widthLabel}, ${scale.toFixed(2)} times the market's`}
-                ends={["Wider than market", "Narrower"]}
+                display={humps ? `each ±${widthLabel}` : `${fmt(center - width)}–${fmt(center + width)}`}
+                valueText={
+                  humps
+                    ? `Each hump plus or minus ${widthLabel}`
+                    : `2 in 3 chance between ${fmt(center - width)} and ${fmt(center + width)}, ${scale.toFixed(2)} times the market's spread`
+                }
+                ends={["Less sure", "More sure"]}
               />
+              <p className="-mt-3 text-[13px] text-slate">
+                {humps
+                  ? `Each hump holds half your view; about 2 in 3 of it lands within ${widthLabel} of the hump's peak. Narrower means you expect a sharper move to those prices.`
+                  : `By your view there's about a 2 in 3 chance it lands in this range, and about 19 in 20 within twice as far (${fmt(center - 2 * width)}–${fmt(center + 2 * width)}). The market's own range is ±${fmt(range.sd)}.`}
+              </p>
               <Switch
                 label="Edit by hand"
                 checked={edit}
                 onChange={(on) => {
+                  custom();
                   setEdit(on);
                   if (on) setBars(belief);
                 }}
               />
+              </div>
+              )}
+            </div>
+          )}
+          {!protecting && (
+            <>
+              <div className="border-t border-mist pt-6">
+                <AmountPicker stake={stake} setStake={setStake} maxStake={maxStake} absorb={shown.maxAbsorbableStakeUsd} />
+              </div>
+              {/* A spread is a fixed shape, not a view blended with the market's, so it has no confidence. */}
+              {!spreading && (
+                <>
+                  <ConfidencePicker value={confidence} onChange={setConfidence} onOther={() => setCustomOpen(true)} />
+                  <ConfidenceDialog
+                    open={customOpen}
+                    onOpenChange={setCustomOpen}
+                    ladder={ladder}
+                    belief={belief}
+                    stake={stake}
+                    value={confidence}
+                    onApply={setConfidence}
+                  />
+                </>
+              )}
             </>
           )}
-          <div className="border-t border-mist pt-6">
-            <Slider
-              label="Confidence"
-              value={confidence}
-              min={CONFIDENCE_LEVELS[0]}
-              max={CONFIDENCE_LEVELS[CONFIDENCE_LEVELS.length - 1]}
-              step={0.25}
-              onChange={(v) => setConfidence(snapConfidence(v))}
-              display={pct(confidence)}
-              valueText={`${Math.round(confidence * 100)} percent trust in my forecast, ${CONFIDENCE_NAMES[CONFIDENCE_LEVELS.indexOf(confidence as (typeof CONFIDENCE_LEVELS)[number])]}`}
-              ends={["Trust the market", "Trust my forecast"]}
-            />
+          <div className="flex flex-col gap-3 border-t border-mist pt-6">
+            {protecting && protectQuote ? (
+              <>
+                {covering && shownBack !== null ? (
+                  <dl className="grid grid-cols-[1fr_auto] gap-y-2 text-[15px]">
+                    <dt className="text-slate">You put in</dt>
+                    <dd className="tnum text-right font-bold text-inkstone">{usd(payStake)}</dd>
+                    <dt className="text-slate">Back if it stays below {fmt(cap)}</dt>
+                    <dd className="tnum text-right text-inkstone">{usd(shownBack)}</dd>
+                    <dt className="text-slate">Income then</dt>
+                    <dd className="tnum text-right font-bold text-gain">+{usd(shownBack - payStake)}</dd>
+                    <dt className="text-slate">Gemini fees (included)</dt>
+                    <dd className="tnum text-right text-inkstone">{usd(shown.feesUsd ?? 0)}</dd>
+                  </dl>
+                ) : collaring && shownBack !== null ? (
+                  <dl className="grid grid-cols-[1fr_auto] gap-y-2 text-[15px]">
+                    <dt className="text-slate">You put in</dt>
+                    <dd className="tnum text-right font-bold text-inkstone">{usd(payStake)}</dd>
+                    <dt className="text-slate">
+                      Back if it ends {fmt(floor)}–{fmt(cap)}
+                    </dt>
+                    <dd className="tnum text-right text-inkstone">{usd(shownBack)}</dd>
+                    <dt className="text-slate">Net cost then</dt>
+                    <dd className="tnum text-right font-bold text-inkstone">{usd(payStake - shownBack)}</dd>
+                    {floorAloneCost !== null && (
+                      <>
+                        <dt className="text-slate">Floor alone would cost</dt>
+                        <dd className="tnum text-right text-inkstone">{usd(floorAloneCost)}</dd>
+                      </>
+                    )}
+                    <dt className="text-slate">Gemini fees (included)</dt>
+                    <dd className="tnum text-right text-inkstone">{usd(shown.feesUsd ?? 0)}</dd>
+                  </dl>
+                ) : (
+                  <dl className="grid grid-cols-[1fr_auto] gap-y-2 text-[15px]">
+                    <dt className="flex items-center gap-2 text-slate">Protection costs {fill && <LiveDot label="" />}</dt>
+                    <dd className="text-right font-bold text-inkstone">
+                      <TickNumber value={fill ? payStake + fill.delta : payStake} text={usd(fill ? payStake + fill.delta : payStake)} />
+                    </dd>
+                    <dt className="text-slate">Gemini fees (included)</dt>
+                    <dd className="tnum text-right text-inkstone">{usd(shown.feesUsd ?? 0)}</dd>
+                    <dt className="text-slate">Pays out if below</dt>
+                    <dd className="tnum text-right font-bold text-inkstone">{fmt(floor)}</dd>
+                    <dt className="text-slate">Pays up to</dt>
+                    <dd className="tnum text-right font-bold text-inkstone">{usd(shown.maxPayout)}</dd>
+                  </dl>
+                )}
+                {tooBig && (
+                  <p className="rounded-2xl bg-porcelain px-4 py-3 text-[14px] text-inkstone">
+                    That would cost {usd(payStake)}, over the {usd(maxStake, 0)} per-position limit on devnet. Protect less {name}, or pick a lower floor.
+                  </p>
+                )}
+              </>
+            ) : tradable ? (
+              <>
+                <dl className="grid grid-cols-[1fr_auto] gap-y-2 text-[15px]">
+                  <dt className="text-slate">You pay</dt>
+                  <dd className="tnum text-right font-bold text-inkstone">{usd(stake)}</dd>
+                  {fill && (
+                    <>
+                      <dt className="text-slate">Contracts + fees to fill</dt>
+                      <dd className="text-right font-bold text-inkstone">
+                        <TickNumber value={fill.costNow} text={usd(fill.costNow)} />
+                      </dd>
+                    </>
+                  )}
+                  <dt className="text-slate">Really at risk</dt>
+                  <dd className="text-right font-bold text-inkstone">
+                    <TickNumber value={stake - getBack.min} text={usd(stake - getBack.min)} />
+                  </dd>
+                  <dt className="text-slate">Gemini fees (included)</dt>
+                  <dd className="tnum text-right text-inkstone">{usd(shown.feesUsd)}</dd>
+                  <dt className="text-slate">You get back</dt>
+                  <dd className="text-right font-bold text-inkstone">
+                    <TickNumber value={getBack.min + getBack.max} text={`${usd(getBack.min, 0)} – ${usd(getBack.max, 0)}`} />
+                  </dd>
+                  <dt className="text-slate">Chance of profit</dt>
+                  <dd className="tnum text-right font-bold text-inkstone">{pct(chanceMkt)}</dd>
+                </dl>
+                {fill && (
+                  <p className="flex flex-wrap items-center gap-x-2 text-[13px] text-smoke">
+                    <LiveDot />
+                    <span>
+                      Gemini&apos;s asks, every few seconds
+                      {Math.abs(fill.delta) >= 0.01 ? ` · ${fill.delta > 0 ? "▲" : "▼"} ${usd(Math.abs(fill.delta))} since the chart was drawn` : ""}
+                    </span>
+                  </p>
+                )}
+              </>
+            ) : closed ? (
+              <p className="rounded-2xl bg-porcelain px-4 py-3 text-[14px] text-inkstone">
+                {closesIn > 0
+                  ? `This market settles in ${Math.max(1, Math.round(closesIn / 60_000))} min, so it's closed for new positions. Quotes thin out in the last minutes, and there's no time left to lock a payout.`
+                  : "This market has settled."}
+              </p>
+            ) : (
+              <p className="text-[14px] text-slate">
+                {spreading
+                  ? "Put in a bit more: at this amount the spread is smaller than one contract per step."
+                  : !started
+                    ? ordered
+                      ? "Pick an outlook to build your hedge."
+                      : "Set your odds to build a position."
+                    : "Your view is too close to the market's to trade yet."}
+              </p>
+            )}
+            <button type="button" className="btn btn-primary btn-block" disabled={!tradable} onClick={openReview}>
+              {covering ? "Review covered call" : protecting ? "Review protection" : spreading ? "Review spread" : "Review hedge"}
+            </button>
+            <p className="text-center text-[13px] text-smoke">You&apos;ll see a plain summary before you sign anything.</p>
           </div>
-          <StakeInput stake={stake} setStake={setStake} maxStake={maxStake} absorb={shown.maxAbsorbableStakeUsd} />
-          <ConfirmBlock ladder={ladder} server={serverFresh?.data ?? null} noEdge={noEdge} stake={stake} quoteErr={quoteErr} age={serverFresh ? Math.round((now - serverFresh.at) / 1000) : null} />
+          <ReviewDialog
+            open={reviewOpen && tradable}
+            onOpenChange={setReviewOpen}
+            ladder={ladder}
+            quote={shown}
+            stake={payStake}
+            confidence={protecting || spreading ? null : confidence}
+            viewLabel={viewLabel}
+            headline={
+              protecting && protectQuote
+                ? covering
+                  ? `If ${name} stays below ${fmt(cap)}, you earn ${usd((shownBack ?? 0) - payStake)}. In return you give up gains above ${fmt(cap)}, up to ${fmt(protectQuote.protection.capTop ?? cap)}.`
+                  : collaring
+                    ? `If ${name} ends below ${fmt(floor)}, you're paid back the drop, down to ${fmt(protectQuote.protection.coveredDownTo ?? floor)}. In return you give up gains above ${fmt(cap)}, up to ${fmt(protectQuote.protection.capTop ?? cap)}.`
+                    : `If ${name} ends below ${fmt(floor)}, you're paid back the drop below it, down to ${fmt(protectQuote.protection.coveredDownTo ?? floor)}. If it stays above, the protection expires.`
+                : spreading && spreadText
+                  ? `This spread pays ${spreadText}.`
+                  : undefined
+            }
+            protection={
+              protecting
+                ? {
+                    floor: covering ? null : fmt(floor),
+                    chancePays: ladder.marketProb.reduce((s, p, j) => s + (shown.payoutByBucket[j] > shown.cashUsd + 0.005 ? p : 0), 0),
+                    ...((collaring || covering) && shownBack !== null && protectQuote
+                      ? { cap: fmt(cap), capTop: fmt(protectQuote.protection.capTop ?? cap), backInMiddle: shownBack }
+                      : {}),
+                  }
+                : undefined
+            }
+            server={serverFresh?.data ?? null}
+            quoteErr={quoteErr}
+            age={serverFresh ? Math.round((now - serverFresh.at) / 1000) : null}
+          />
         </aside>
       </div>
     </div>
   );
 }
 
-function StakeInput({ stake, setStake, maxStake, absorb }: { stake: number; setStake: (n: number) => void; maxStake: number; absorb: number | null }) {
-  const [text, setText] = useState(String(stake));
+function ConfidencePicker({ value, onChange, onOther }: { value: number; onChange: (c: number) => void; onOther: () => void }) {
+  const preset = presetIndex(value);
+  const custom = preset < 0;
+  // Positions 0..2 are the presets, 3 is "Other".
+  const active = custom ? CONFIDENCE_LEVELS.length : preset;
+  const refs = useRef<(HTMLButtonElement | null)[]>([]);
+  const segClass = (on: boolean) =>
+    `tnum rounded-full py-1.5 text-[14px] font-bold transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-signal-violet ${
+      on ? "bg-signal-violet text-white shadow-sm" : "text-slate hover:bg-porcelain hover:text-inkstone"
+    }`;
+  const pick = (i: number) => {
+    const j = (i + CONFIDENCE_LEVELS.length + 1) % (CONFIDENCE_LEVELS.length + 1);
+    if (j < CONFIDENCE_LEVELS.length) onChange(CONFIDENCE_LEVELS[j]);
+    refs.current[j]?.focus();
+  };
   return (
-    <div className="flex flex-col gap-2">
-      <label className="stat-label" htmlFor="stake">
-        Stake
-      </label>
+    <div className="flex flex-col gap-3">
+      <div>
+        <div className="flex items-baseline justify-between gap-3">
+          <span className="stat-label" id="confidence-label">
+            Confidence
+          </span>
+          <span className="text-[14px] text-smoke">{confidenceName(value)}</span>
+        </div>
+        <p className="mt-1 font-bold text-inkstone">How much do you trust your view?</p>
+        <p className="text-[14px] text-slate">It&apos;s how much your view counts against the market&apos;s. Higher bets more, and loses more if you&apos;re wrong.</p>
+      </div>
+      <div
+        role="radiogroup"
+        aria-labelledby="confidence-label"
+        className="grid grid-cols-4 gap-1 rounded-full bg-mist p-1"
+        onKeyDown={(e) => {
+          if (e.key === "ArrowRight" || e.key === "ArrowUp") {
+            e.preventDefault();
+            pick(active + 1);
+          } else if (e.key === "ArrowLeft" || e.key === "ArrowDown") {
+            e.preventDefault();
+            pick(active - 1);
+          }
+        }}
+      >
+        {CONFIDENCE_LEVELS.map((level, i) => {
+          const on = i === active;
+          return (
+            <button
+              key={level}
+              ref={(el) => {
+                refs.current[i] = el;
+              }}
+              type="button"
+              role="radio"
+              aria-checked={on}
+              aria-label={`${Math.round(level * 100)} percent, ${CONFIDENCE_NAMES[i]}`}
+              tabIndex={on ? 0 : -1}
+              onClick={() => onChange(level)}
+              className={segClass(on)}
+            >
+              {pct(level)}
+            </button>
+          );
+        })}
+        <button
+          ref={(el) => {
+            refs.current[CONFIDENCE_LEVELS.length] = el;
+          }}
+          type="button"
+          role="radio"
+          aria-checked={custom}
+          aria-haspopup="dialog"
+          aria-label={custom ? `Other, ${Math.round(value * 100)} percent. Change` : "Other: set your own confidence"}
+          tabIndex={custom ? 0 : -1}
+          onClick={onOther}
+          className={segClass(custom)}
+        >
+          {custom ? pct(value) : "Other"}
+        </button>
+      </div>
+      <div className="flex justify-between text-[14px] text-smoke">
+        <span>Trust the market</span>
+        <span>Trust my forecast</span>
+      </div>
+    </div>
+  );
+}
+
+/** Spread: which way, and the two prices between which each $1 move adds a step. */
+function SpreadControls({
+  strikes,
+  unit,
+  direction,
+  setDirection,
+  value,
+  onChange,
+  summary,
+}: {
+  strikes: number[];
+  unit: Ladder["unit"];
+  direction: "up" | "down";
+  setDirection: (d: "up" | "down") => void;
+  value: [number, number];
+  onChange: (v: [number, number]) => void;
+  summary: string;
+}) {
+  const [lo, hi] = value;
+  const label = (i: number) => formatValue(strikes[i], unit);
+  const seg = (on: boolean) =>
+    `ease rounded-full py-1.5 text-[14px] font-bold ${on ? "bg-signal-violet text-white shadow-sm" : "text-slate hover:bg-porcelain hover:text-inkstone"}`;
+  return (
+    <div className="flex flex-col gap-4">
+      <div>
+        <span className="stat-label" id="spread-dir">
+          Your spread
+        </span>
+        <p className="mt-1 font-bold text-inkstone">Which way will it move?</p>
+      </div>
+      <div role="radiogroup" aria-labelledby="spread-dir" className="grid grid-cols-2 gap-1 rounded-full bg-mist p-1">
+        <button type="button" role="radio" aria-checked={direction === "up"} className={seg(direction === "up")} onClick={() => setDirection("up")}>
+          Up
+        </button>
+        <button type="button" role="radio" aria-checked={direction === "down"} className={seg(direction === "down")} onClick={() => setDirection("down")}>
+          Down
+        </button>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1 text-[13px] text-slate">
+          {direction === "up" ? "Starts paying above" : "Pays most at or below"}
+          <select
+            className="input tnum !py-2.5 text-[16px] font-bold"
+            value={lo}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              onChange([v, Math.max(hi, v + 1)]);
+            }}
+          >
+            {strikes.slice(0, -1).map((_, i) => (
+              <option key={i} value={i}>
+                {label(i)}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-[13px] text-slate">
+          {direction === "up" ? "Pays most at or above" : "Starts paying below"}
+          <select
+            className="input tnum !py-2.5 text-[16px] font-bold"
+            value={hi}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              onChange([Math.min(lo, v - 1), v]);
+            }}
+          >
+            {strikes.map((_, i) =>
+              i > 0 ? (
+                <option key={i} value={i}>
+                  {label(i)}
+                </option>
+              ) : null,
+            )}
+          </select>
+        </label>
+      </div>
+      {summary && <p className="text-[14px] text-slate">Pays {summary}.</p>}
+    </div>
+  );
+}
+
+/** Range: the two prices you think it lands between (indexes into the ladder's cut points). */
+function RangeControls({
+  cuts,
+  labels,
+  value,
+  onChange,
+}: {
+  cuts: number[];
+  labels: string[];
+  value: [number, number];
+  onChange: (v: [number, number]) => void;
+}) {
+  const [lo, hi] = value;
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <span className="stat-label">Your range</span>
+        <p className="mt-1 font-bold text-inkstone">Where do you think it lands?</p>
+        <p className="text-[14px] text-slate">Contour bets that it ends between these two prices. A narrower range pays more if you&apos;re right.</p>
+      </div>
+      <div className="grid grid-cols-2 gap-3">
+        <label className="flex flex-col gap-1 text-[13px] text-slate">
+          From
+          <select
+            className="input tnum !py-2.5 text-[16px] font-bold"
+            value={lo}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              onChange([v, Math.max(hi, v + 1)]);
+            }}
+          >
+            {cuts.slice(0, -1).map((_, i) => (
+              <option key={i} value={i}>
+                {labels[i]}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label className="flex flex-col gap-1 text-[13px] text-slate">
+          To
+          <select
+            className="input tnum !py-2.5 text-[16px] font-bold"
+            value={hi}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              onChange([Math.min(lo, v - 1), v]);
+            }}
+          >
+            {cuts.map((_, i) =>
+              i > 0 ? (
+                <option key={i} value={i}>
+                  {labels[i]}
+                </option>
+              ) : null,
+            )}
+          </select>
+        </label>
+      </div>
+    </div>
+  );
+}
+
+const AMOUNTS = [25, 50, 100, 250];
+
+/** Quick amounts plus a free-form field, like a brokerage order ticket. */
+function AmountPicker({ stake, setStake, maxStake, absorb }: { stake: number; setStake: (n: number) => void; maxStake: number; absorb: number | null }) {
+  const [text, setText] = useState(String(stake));
+  const input = useRef<HTMLInputElement>(null);
+  // Follow quick-amount clicks, but never overwrite what the user is typing.
+  useEffect(() => {
+    if (document.activeElement !== input.current) setText(String(stake));
+  }, [stake]);
+  const amounts = AMOUNTS.filter((a) => a <= maxStake);
+  return (
+    <div className="flex flex-col gap-3">
+      <div>
+        <label className="stat-label" htmlFor="stake">
+          Amount
+        </label>
+        <p className="mt-1 font-bold text-inkstone">How much do you want to put in?</p>
+      </div>
+      <div className="grid grid-cols-4 gap-2" role="group" aria-label="Quick amounts">
+        {amounts.map((a) => {
+          const on = stake === a;
+          return (
+            <button
+              key={a}
+              type="button"
+              aria-pressed={on}
+              onClick={() => setStake(a)}
+              className={`ease tnum rounded-full border py-1.5 text-[14px] font-bold ${
+                on ? "border-signal-violet bg-signal-violet text-white" : "border-mist bg-porcelain text-inkstone hover:border-ash"
+              }`}
+            >
+              ${a}
+            </button>
+          );
+        })}
+      </div>
       <div className="relative">
+        <span className="pointer-events-none absolute left-4 top-1/2 -translate-y-1/2 text-[20px] font-bold text-slate">$</span>
         <input
           id="stake"
-          className="input tnum !pr-16 text-[20px] font-bold"
+          ref={input}
+          className="input tnum !pl-9 !pr-16 text-[20px] font-bold"
           inputMode="decimal"
+          aria-describedby="stake-note"
           value={text}
           onChange={(e) => {
             const t = e.target.value.replace(/[^0-9.]/g, "");
@@ -387,119 +1266,11 @@ function StakeInput({ stake, setStake, maxStake, absorb }: { stake: number; setS
         />
         <span className="absolute right-5 top-1/2 -translate-y-1/2 text-slate">USDC</span>
       </div>
-      <p className="text-[14px] text-smoke">
+      <p id="stake-note" className="text-[13px] text-smoke">
         Up to {usd(maxStake, 0)} per position on devnet.
-        {absorb !== null && absorb < maxStake ? ` Quoted depth absorbs about ${usd(absorb, 0)} at these prices.` : ""}
+        {absorb !== null && absorb < maxStake ? ` The market can fill about ${usd(absorb, 0)} at these prices.` : ""}
       </p>
     </div>
   );
 }
 
-function ConfirmBlock({ ladder, server, noEdge, stake, quoteErr, age }: { ladder: Ladder; server: StoredQuote | null; noEdge: boolean; stake: number; quoteErr: string | null; age: number | null }) {
-  const router = useRouter();
-  const qc = useQueryClient();
-  const { connection } = useConnection();
-  const { publicKey } = useWallet();
-  const anchorWallet = useAnchorWallet();
-  const program = useProgram();
-  const mint = useUsdcMint();
-  const cfg = useDeskConfig();
-  const chainCfg = useChainConfig();
-  const bal = useUsdcBalance(publicKey, mint);
-  const [dialog, setDialog] = useState(false);
-  const [busy, setBusy] = useState<string | null>(null);
-  const [err, setErr] = useState<string | null>(null);
-
-  const deployed = !!chainCfg.data && !!mint;
-  const short = bal.data !== undefined && bal.data < stake;
-
-  async function faucet() {
-    if (!publicKey) return;
-    setBusy("Sending test USDC…");
-    setErr(null);
-    try {
-      await desk.faucet(publicKey.toBase58());
-      await qc.invalidateQueries({ queryKey: ["usdc"] });
-    } catch (e) {
-      setErr((e as Error).message);
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function confirm() {
-    if (!publicKey || !anchorWallet || !program || !mint || !server) return;
-    setErr(null);
-    try {
-      setBusy("Waiting for your signature…");
-      const nonce = BigInt(Date.now()) * BigInt(1000) + BigInt(Math.floor(Math.random() * 1000));
-      const { ix, position } = await openPositionIx(program, {
-        owner: publicKey,
-        usdcMint: mint,
-        nonce,
-        marketIdHex: server.marketIdHex,
-        forecastHashHex: server.forecastHash,
-        stakeBase: server.stakeBaseUnits,
-        scheduleBase: server.scheduleBaseUnits,
-        expiryTs: server.expiryTs,
-      });
-      setBusy("Locking your payout schedule on Solana…");
-      await sendTx(connection, anchorWallet, new Transaction().add(ix));
-      router.push(`/p/${position.toBase58()}`);
-    } catch (e) {
-      setErr((e as Error).message.slice(0, 220));
-      setBusy(null);
-    }
-  }
-
-  let label = "Confirm position";
-  let action: (() => void) | null = confirm;
-  let disabled = false;
-  if (noEdge) {
-    disabled = true;
-  } else if (!publicKey) {
-    label = "Connect wallet to confirm";
-    action = () => setDialog(true);
-  } else if (!deployed) {
-    label = "Escrow not deployed yet";
-    disabled = true;
-  } else if (cfg.data && !cfg.data.desk) {
-    label = "Desk is not connected to the chain";
-    disabled = true;
-  } else if (short) {
-    label = `Get test USDC`;
-    action = cfg.data?.faucetEnabled ? faucet : null;
-    disabled = !cfg.data?.faucetEnabled;
-  } else if (!server) {
-    label = "Waiting for desk quote…";
-    disabled = true;
-  }
-  if (busy) {
-    label = busy;
-    disabled = true;
-  }
-
-  return (
-    <div className="flex flex-col gap-3 border-t border-mist pt-6">
-      {noEdge && (
-        <p className="rounded-2xl bg-porcelain px-4 py-3 text-[14px] text-inkstone">
-          Your forecast is too close to the market&apos;s to cover trading costs.
-        </p>
-      )}
-      <button className="btn btn-primary btn-block" disabled={disabled} onClick={() => action?.()}>
-        {label}
-      </button>
-      <p className="text-[14px] text-smoke">
-        {quoteErr
-          ? `Desk quote failed: ${quoteErr}`
-          : server
-            ? `Desk quote · ${age}s ago · schedule locked on confirm`
-            : "Preview computed in your browser; desk quote pending."}
-        {publicKey && bal.data !== undefined ? ` · Balance ${usd(bal.data)}` : ""}
-      </p>
-      {err && <p className="text-[14px] text-inkstone">{err}</p>}
-      {!noEdge && <p className="text-[14px] text-smoke">Expires {settleLabel(ladder.expiry)}. If the desk does not accept within minutes, cancel for a full refund.</p>}
-      <WalletDialog open={dialog} onOpenChange={setDialog} />
-    </div>
-  );
-}

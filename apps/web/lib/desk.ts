@@ -25,6 +25,8 @@ export interface MarketSummary {
     trade: boolean;
     focus?: { label: string; marketProb: number; yourProb: number; paysIfWins: number };
   } | null;
+  /** A made-up demo market: explorable, never quotable. */
+  sample?: boolean;
 }
 
 export interface StoredQuote {
@@ -38,11 +40,20 @@ export interface StoredQuote {
   expiryTs: number;
   validUntil: number;
   capturedAt: string;
-  preimage: { ticker: string; marketProb: number[]; belief: number[]; confidence: number; quoteId: string; capturedAt: string };
+  preimage: { ticker: string; marketProb: number[]; belief: number[]; confidence: number; quoteId: string; capturedAt: string; protect?: { units: number; floor?: number; cap?: number }; spread?: { direction: "up" | "down"; from: number; to: number } };
   quote: Omit<Quote, "raw"> & { iterations: number };
   marketProb: number[];
   bucketLabels: string[];
   crossedStrikes: string[];
+}
+
+/** Fast tier for a market page: the underlying's spot price and every contract's current asks. */
+export interface LiveView {
+  at: number;
+  frozen: boolean;
+  sample: boolean;
+  spot: { pair: string; price: number; open24h: number | null; bid: number | null; ask: number | null } | null;
+  asks: { symbol: string; yesAsk: number | null; noAsk: number | null }[];
 }
 
 export interface DeskConfig {
@@ -68,10 +79,26 @@ async function j<T>(res: Response): Promise<T> {
 
 export const desk = {
   config: () => fetch(`${env.deskUrl}/config`).then((r) => j<DeskConfig>(r)),
-  markets: () => fetch(`${env.deskUrl}/markets`).then((r) => j<{ markets: MarketSummary[]; rejected: number; updatedAt: number }>(r)),
+  /** frozenAt is set when Gemini is down and the desk is serving its saved snapshot instead. */
+  markets: () =>
+    fetch(`${env.deskUrl}/markets`).then((r) => j<{ markets: MarketSummary[]; rejected: number; updatedAt: number; frozenAt?: number | null }>(r)),
   ladder: (ticker: string) =>
-    fetch(`${env.deskUrl}/markets/${encodeURIComponent(ticker)}`).then((r) => j<{ ladder: Ladder; capturedAt: string; volume: number | null }>(r)),
-  quote: (body: { ticker: string; belief: number[]; confidence: number; stakeUsd: number }, signal?: AbortSignal) =>
+    fetch(`${env.deskUrl}/markets/${encodeURIComponent(ticker)}`).then((r) =>
+      j<{ ladder: Ladder; capturedAt: string; volume: number | null; frozen?: boolean; sample?: boolean }>(r),
+    ),
+  live: (ticker: string, signal?: AbortSignal) => fetch(`${env.deskUrl}/live/${encodeURIComponent(ticker)}`, { signal }).then((r) => j<LiveView>(r)),
+  quote: (
+    body: {
+      ticker: string;
+      belief: number[];
+      confidence: number;
+      stakeUsd: number;
+      /** Floor (protect), floor + cap (collar), or cap only (covered call). */
+      protect?: { units: number; floor?: number; cap?: number };
+      spread?: { direction: "up" | "down"; from: number; to: number };
+    },
+    signal?: AbortSignal,
+  ) =>
     fetch(`${env.deskUrl}/quote`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal }).then((r) =>
       j<StoredQuote>(r),
     ),

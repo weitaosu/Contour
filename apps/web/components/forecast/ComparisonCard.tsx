@@ -1,10 +1,10 @@
 import type { Quote } from "@contour/core";
 import { cents, pct, usd } from "@/lib/format";
 
-export function ComparisonCard({ quote, stake }: { quote: Omit<Quote, "raw">; stake: number }) {
+export function ComparisonCard({ quote, stake, bare }: { quote: Omit<Quote, "raw">; stake: number; bare?: boolean }) {
   const c = quote.comparison;
   return (
-    <section className="card grid gap-6 md:grid-cols-[1fr_1.1fr] md:items-start">
+    <section className={bare ? "grid gap-5" : "card grid gap-6 md:grid-cols-[1fr_1.1fr] md:items-start"}>
       <div>
         <p className="eyebrow">Instead, one contract</p>
         <h3 className="card-title mt-1">

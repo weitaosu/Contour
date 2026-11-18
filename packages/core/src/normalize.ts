@@ -30,6 +30,12 @@ export interface ContractLike {
 export const MAX_BUCKETS = 40;
 export const MIN_QUOTED = 3;
 export const PROB_FLOOR = 0.001;
+/**
+ * A strike's quote only counts as evidence of the market's odds when it is two-sided and no wider
+ * than this (yes ask + no ask − 1). Wider or one-sided quotes (common on thin ladders and in a
+ * market's last minutes) only bound the estimate.
+ */
+export const MAX_RELIABLE_SPREAD = 0.2;
 
 export type Classification =
   | { ok: true; kind: LadderKind }
@@ -169,6 +175,37 @@ function interpolate(xs: number[], ys: (number | null)[]): { values: number[]; f
   return { values, filled };
 }
 
+/** Bid and ask for YES, with the same fallbacks as instrumentMid. */
+function bidAsk(i: Instrument): { bid: number | null; ask: number | null } {
+  return { bid: i.bestBid ?? (i.noAsk !== null ? 1 - i.noAsk : null), ask: i.bestAsk ?? i.yesAsk };
+}
+
+/**
+ * The market's P(price ≥ strike) for a threshold ladder. Only tight two-sided quotes are evidence;
+ * the rest are filled in from their neighbours and then kept inside whatever bound their quote does
+ * show, so a stale, one-sided or very wide quote can't bend the curve. Finally the curve is forced
+ * non-increasing (running minimum, as in scripts/fixtures/reference.py).
+ */
+export function thresholdSurvival(instruments: Instrument[], strikes: number[]): { values: number[]; reliable: boolean[] } {
+  const quotes = instruments.map(bidAsk);
+  const reliable = quotes.map(({ bid, ask }) => bid !== null && ask !== null && ask >= bid - 1e-9 && ask - bid <= MAX_RELIABLE_SPREAD + 1e-9);
+  const mids = quotes.map((q, i) => (reliable[i] ? (q.bid! + q.ask!) / 2 : null));
+  const { values } = interpolate(strikes, mids);
+  const bounded = values.map((v, i) => {
+    const { bid, ask } = quotes[i];
+    let x = Math.min(1, Math.max(0, v));
+    if (!reliable[i]) {
+      if (bid !== null && ask !== null && ask >= bid) x = Math.min(ask, Math.max(bid, x));
+      else if (bid !== null) x = Math.max(bid, x);
+      else if (ask !== null) x = Math.min(ask, x);
+    }
+    return x;
+  });
+  const out: number[] = [];
+  bounded.forEach((v, i) => out.push(Math.min(v, i > 0 ? out[i - 1] : 1)));
+  return { values: out, reliable };
+}
+
 export class LadderRejected extends Error {}
 
 /** Normalize a Gemini event into a Ladder. Throws LadderRejected with a reason when it cannot be traded safely. */
@@ -191,10 +228,11 @@ export function normalizeEvent(e: EventLike, opts: NormalizeOptions = {}): Ladde
     const strikes = sorted.map((c) => Number(c.strike!.value));
     const instruments = sorted.map(toInstrument);
     const n = strikes.length;
-    const { values, filled } = interpolate(strikes, instruments.map(instrumentMid));
-    // Force mids non-increasing in strike (running minimum), clamp to [0, 1].
-    const m: number[] = [];
-    for (let i = 0; i < n; i++) m.push(Math.min(Math.max(0, Math.min(1, values[i])), i > 0 ? m[i - 1] : 1));
+    const { values: m, reliable } = thresholdSurvival(instruments, strikes);
+    const reliableCount = reliable.filter(Boolean).length;
+    if (!opts.allowUnquoted && reliableCount < MIN_QUOTED)
+      throw new LadderRejected(`only ${reliableCount} strikes have tight two-sided quotes, too few to read the market's odds`);
+    const filled = reliable.map((r) => !r);
     const q = new Array<number>(n + 1);
     q[0] = 1 - m[0];
     for (let j = 1; j < n; j++) q[j] = m[j - 1] - m[j];

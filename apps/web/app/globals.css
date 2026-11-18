@@ -94,6 +94,18 @@ h1, h2, h3, h4 { font-weight: 700; color: var(--color-inkstone); }
 .fade-in { animation: fade-in 400ms cubic-bezier(.22,.61,.36,1) both; }
 @keyframes pulse-ring { 0% { transform: scale(.6); opacity: .55; } 100% { transform: scale(1.9); opacity: 0; } }
 .pulse-ring { transform-box: fill-box; transform-origin: center; animation: pulse-ring 1.8s cubic-bezier(.2,.8,.2,1) infinite; }
+/* Live numbers: a brief tint when a price ticks, green up, grey down (the palette has no red). */
+@keyframes tick-up { from { background-color: rgb(26 171 139 / 0.22); } to { background-color: rgb(26 171 139 / 0); } }
+@keyframes tick-down { from { background-color: rgb(31 31 31 / 0.12); } to { background-color: rgb(31 31 31 / 0); } }
+.tick-up, .tick-down { border-radius: 6px; box-decoration-break: clone; }
+.tick-up { animation: tick-up 900ms cubic-bezier(.2,.8,.2,1) both; }
+.tick-down { animation: tick-down 900ms cubic-bezier(.2,.8,.2,1) both; }
+/* The "live" dot beside streaming numbers. */
+@keyframes live-pulse { 0% { box-shadow: 0 0 0 0 rgb(26 171 139 / 0.45); } 100% { box-shadow: 0 0 0 7px rgb(26 171 139 / 0); } }
+.live-dot { display: inline-block; width: 7px; height: 7px; border-radius: 999px; background: var(--color-gain); animation: live-pulse 1.6s ease-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .tick-up, .tick-down, .live-dot, .pulse-ring { animation: none; }
+}
 
 :focus-visible { outline: 2px solid var(--color-signal-violet); outline-offset: 2px; border-radius: 6px; }
 
