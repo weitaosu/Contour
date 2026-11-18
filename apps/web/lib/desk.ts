@@ -12,6 +12,8 @@ export interface MarketSummary {
   bucketCount: number;
   quotedCount: number;
   volume: number | null;
+  /** Traded in the last 24 hours. */
+  volume24h?: number | null;
   marketProb: number[];
   cutLabels: string[];
   bucketLabels: string[];
@@ -27,6 +29,19 @@ export interface MarketSummary {
   } | null;
   /** A made-up demo market: explorable, never quotable. */
   sample?: boolean;
+}
+
+/** One front-page section per Gemini category (see the desk's CategorySection). */
+export interface CategorySection {
+  category: string;
+  events: number;
+  /** Traded in the last 24 hours: what "busiest" means on the front page. */
+  volume24h: number;
+  /** Traded since each market listed. */
+  volume: number;
+  tradable: number;
+  /** Its most active markets that can't be one curve, with the reason in plain words. */
+  popular: { ticker: string; title: string; volume24h: number; volume: number; reason: string }[];
 }
 
 export interface StoredQuote {
@@ -81,7 +96,7 @@ export const desk = {
   config: () => fetch(`${env.deskUrl}/config`).then((r) => j<DeskConfig>(r)),
   /** frozenAt is set when Gemini is down and the desk is serving its saved snapshot instead. */
   markets: () =>
-    fetch(`${env.deskUrl}/markets`).then((r) => j<{ markets: MarketSummary[]; rejected: number; updatedAt: number; frozenAt?: number | null }>(r)),
+    fetch(`${env.deskUrl}/markets`).then((r) => j<{ markets: MarketSummary[]; rejected: number; updatedAt: number; frozenAt?: number | null; sections?: CategorySection[] }>(r)),
   ladder: (ticker: string) =>
     fetch(`${env.deskUrl}/markets/${encodeURIComponent(ticker)}`).then((r) =>
       j<{ ladder: Ladder; capturedAt: string; volume: number | null; frozen?: boolean; sample?: boolean }>(r),

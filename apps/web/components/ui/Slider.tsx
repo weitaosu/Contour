@@ -12,6 +12,8 @@ export function Slider({
   display,
   ends,
   valueText,
+  caption,
+  compact = false,
 }: {
   label: string;
   value: number;
@@ -22,12 +24,17 @@ export function Slider({
   display?: React.ReactNode;
   ends?: [string, string];
   valueText?: string;
+  /** One short line under the track (compact sliders use it instead of end labels). */
+  caption?: React.ReactNode;
+  compact?: boolean;
 }) {
   return (
-    <div className="flex flex-col gap-3">
+    <div className={`flex flex-col ${compact ? "gap-1" : "gap-3"}`}>
       <div className="flex items-baseline justify-between gap-3">
         <span className="stat-label">{label}</span>
-        {display !== undefined && <span className="tnum rounded-full bg-porcelain px-3 py-0.5 font-bold text-inkstone">{display}</span>}
+        {display !== undefined && (
+          <span className={`tnum rounded-full px-3 py-0.5 font-bold ${compact ? "bg-signal-violet/10 text-[14px] text-signal-violet" : "bg-porcelain text-inkstone"}`}>{display}</span>
+        )}
       </div>
       <RSlider.Root
         className="relative flex h-6 w-full touch-none items-center"
@@ -46,6 +53,7 @@ export function Slider({
           className="block h-6 w-6 cursor-grab rounded-full border-[2.5px] border-signal-violet bg-porcelain shadow-[0_0_0_0_rgba(89,79,244,0.18)] transition-[box-shadow,transform] duration-150 hover:scale-110 hover:shadow-[0_0_0_7px_rgba(89,79,244,0.14)] focus-visible:outline-none focus-visible:shadow-[0_0_0_7px_rgba(89,79,244,0.22)] active:cursor-grabbing active:scale-115 active:shadow-[0_0_0_10px_rgba(89,79,244,0.16)]"
         />
       </RSlider.Root>
+      {caption && <p className="tnum text-[12.5px] leading-snug text-slate">{caption}</p>}
       {ends && (
         <div className="flex justify-between text-[14px] text-smoke">
           <span>{ends[0]}</span>

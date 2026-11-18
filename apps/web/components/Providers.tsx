@@ -18,7 +18,8 @@ export function Providers({ children }: { children: ReactNode }) {
     <QueryClientProvider client={qc}>
       <ConnectionProvider endpoint={env.rpcUrl} config={{ commitment: "confirmed" }}>
         {/* Wallet Standard wallets (Phantom, Solflare, Backpack) register themselves; no adapters needed. */}
-        <WalletProvider wallets={[]} autoConnect>
+        {/* A declined signature is the user's choice, shown in plain words where it happened: not a console error. */}
+        <WalletProvider wallets={[]} autoConnect onError={(e) => !/reject|declin|denied/i.test(e.message ?? "") && console.error(e)}>
           {children}
         </WalletProvider>
       </ConnectionProvider>

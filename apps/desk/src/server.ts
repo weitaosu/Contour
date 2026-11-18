@@ -57,12 +57,12 @@ export async function buildServer() {
 
   app.get("/markets", async (req) => {
     const q = z.object({ category: z.string().optional(), search: z.string().optional() }).parse(req.query);
-    const { markets: all, rejected, updatedAt, frozenAt } = await markets.listMarkets();
+    const { markets: all, rejected, updatedAt, frozenAt, sections } = await markets.listMarkets();
     const s = q.search?.toLowerCase().trim();
     const filtered = all.filter(
       (m) => (!q.category || m.category === q.category) && (!s || m.title.toLowerCase().includes(s) || m.ticker.toLowerCase().includes(s)),
     );
-    return { markets: filtered, rejected, updatedAt, frozenAt };
+    return { markets: filtered, rejected, updatedAt, frozenAt, sections };
   });
 
   app.get("/markets/:ticker", async (req) => {

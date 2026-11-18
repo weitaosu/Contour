@@ -235,6 +235,17 @@ function Step({ n, children }: { n: number; children: React.ReactNode }) {
   );
 }
 
+/** What went wrong with a payment, in words a newcomer can act on (the raw message stays for anything else). */
+function paymentError(e: Error): string {
+  const m = e.message ?? "";
+  if (/reject|declin|denied|cancel/i.test(m)) return "You declined to sign, so nothing was sent and no money moved. Confirm again when you're ready.";
+  if (/insufficient (funds|lamports)|no record of a prior credit|debit an account/i.test(m))
+    return "Your wallet needs a little SOL for the network fee. Get test USDC again (it includes some SOL), then confirm.";
+  if (/blockhash|expired|timed? ?out/i.test(m)) return "The network took too long to confirm, so the transaction lapsed. Nothing moved; confirm again.";
+  if (/user ?limit|daily|cap/i.test(m)) return "That's over your per-position or daily limit. Try a smaller amount.";
+  return `The payment didn't go through: ${m.slice(0, 200)}`;
+}
+
 function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: Ladder; server: StoredQuote | null; stake: number; quoteErr: string | null; age: number | null; ack: boolean }) {
   const router = useRouter();
   const qc = useQueryClient();
@@ -287,7 +298,7 @@ function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: L
       await sendTx(connection, anchorWallet, new Transaction().add(ix));
       router.push(`/p/${position.toBase58()}`);
     } catch (e) {
-      setErr((e as Error).message.slice(0, 220));
+      setErr(paymentError(e as Error));
       setBusy(null);
     }
   }

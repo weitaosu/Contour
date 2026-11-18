@@ -21,6 +21,7 @@ export function ProtectCard({
   name,
   source,
   floorAloneCost = null,
+  bare = false,
 }: {
   ladder: Ladder;
   quote: Omit<Quote, "raw">;
@@ -29,6 +30,8 @@ export function ProtectCard({
   source: "desk quote" | "preview";
   /** Collar only: what the floor would cost without the cap, for comparison. */
   floorAloneCost?: number | null;
+  /** Without its own card, inside a workspace panel that frames it. */
+  bare?: boolean;
 }) {
   const kind: "floor" | "collar" | "covered" = protection.floor === null ? "covered" : protection.cap !== null && protection.backInMiddle !== null ? "collar" : "floor";
   const fmt = (v: number) => formatValue(Math.round(v * 100) / 100, ladder.unit);
@@ -64,10 +67,10 @@ export function ProtectCard({
   const belowCap = cap === null ? 0 : ladder.marketProb.reduce((s, q, j) => s + (mids[j] < cap ? q : 0), 0);
 
   return (
-    <section className="card fade-up flex flex-col gap-6" aria-labelledby="protect-headline">
+    <section className={bare ? "fade-up flex flex-col gap-3" : "card fade-up flex flex-col gap-6"} aria-labelledby="protect-headline">
       <div>
-        <p className="eyebrow">{kind === "covered" ? "Covered call" : kind === "collar" ? "Collar" : "Protect what you hold"} · in plain words</p>
-        <p id="protect-headline" className="mt-2 text-[22px] font-bold leading-snug text-inkstone md:text-[26px]" aria-live="polite">
+        {!bare && <p className="eyebrow">{kind === "covered" ? "Covered call" : kind === "collar" ? "Collar" : "Protect what you hold"} · in plain words</p>}
+        <p id="protect-headline" className={bare ? "text-[18px] font-bold leading-snug text-inkstone xl:text-[19px]" : "mt-2 text-[22px] font-bold leading-snug text-inkstone md:text-[26px]"} aria-live="polite">
           {kind === "covered" ? (
             <>
               If {name} stays below <span className="text-signal-violet">{fmt(cap!)}</span>, you earn <span className="text-gain">{usd(income)}</span>. In return you
@@ -86,7 +89,7 @@ export function ProtectCard({
             </>
           )}
         </p>
-        <p className="mt-1 text-slate">
+        <p className={bare ? "mt-0.5 text-[13.5px] text-slate" : "mt-1 text-slate"}>
           {kind === "covered"
             ? `You put in ${usd(cost)}; ${usd(back)} comes back unless ${name} rises past ${fmt(cap!)}.`
             : kind === "collar"
@@ -97,7 +100,23 @@ export function ProtectCard({
         </p>
       </div>
 
-      <div className="-mx-2 rounded-[24px] bg-porcelain px-4 pb-3 pt-5 sm:mx-0 md:px-6">
+      <div className={bare ? "grid gap-3 lg:grid-cols-[minmax(0,1.75fr)_minmax(0,1fr)]" : "contents"}>
+      <div className={bare ? "rounded-[18px] bg-cloud px-3 pb-2 pt-2.5 md:px-4" : "-mx-2 rounded-[24px] bg-porcelain px-4 pb-3 pt-5 sm:mx-0 md:px-6"}>
+        {bare ? (
+          // One line: the outcome under the pointer (or the worst case), alone vs protected.
+          <p className="tnum flex flex-wrap items-baseline gap-x-3 gap-y-0.5 text-[13.5px] text-slate">
+            <span>
+              {hover === null ? <span className="text-smoke">{kind === "covered" ? "Best case · " : "Worst case · "}</span> : null}
+              if it lands {ladder.bucketLabels[focus].replace(/^Below/, "below")}
+            </span>
+            <span>
+              alone <b className="text-[17px] text-inkstone">{signedUsd(alone[focus])}</b>
+            </span>
+            <span>
+              {withLabel.replace(/^With /, "with ")} <b className={`text-[17px] ${withPos[focus] > 0.004 ? "text-gain" : "text-signal-violet"}`}>{signedUsd(withPos[focus])}</b>
+            </span>
+          </p>
+        ) : (
         <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-2">
           <div className="min-w-0">
             <p className="text-[14px] text-slate">
@@ -118,45 +137,49 @@ export function ProtectCard({
             <span className="hidden sm:inline">Point at the chart, or use ← → keys</span>
           </p>
         </div>
-        <ProtectChart ladder={ladder} alone={alone} withPos={withPos} floor={floor} cap={cap} hover={hover} onHover={setHover} />
-        <div className="mt-1 flex flex-wrap items-center gap-x-5 gap-y-1 pb-1 text-[13px] text-slate">
+        )}
+        <ProtectChart ladder={ladder} alone={alone} withPos={withPos} floor={floor} cap={cap} hover={hover} onHover={setHover} height={bare ? 172 : 240} />
+        <div className={`flex flex-wrap items-center gap-x-5 gap-y-1 pb-1 text-slate ${bare ? "text-[12.5px]" : "mt-1 text-[13px]"}`}>
           <span className="inline-flex items-center gap-2">
             <span className="h-0 w-4 border-t-[1.5px] border-dashed border-smoke" /> Your {name} alone
           </span>
           <span className="inline-flex items-center gap-2">
             <span className="h-[3px] w-4 rounded-full bg-signal-violet" /> {withLabel}
           </span>
-          <span className="text-smoke">· gains and losses vs {fmt(protection.reference)} · {source}</span>
+          <span className="text-smoke">· gains and losses vs {fmt(protection.reference)}{bare ? "" : ` · ${source}`}</span>
         </div>
       </div>
 
       {kind === "covered" ? (
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <Tile label="You put in" value={usd(cost)} sub={`includes ${usd(quote.feesUsd ?? 0)} in Gemini fees`} />
-          <Tile label="Income" value={<span className="text-gain">+{usd(income)}</span>} sub={`if it stays below ${fmt(cap!)}`} />
-          <Tile label="Chance you keep it" value={pct(belowCap)} sub={`${oneIn(belowCap)} by the market`} />
-          <Tile label="Gains stop at" value={fmt(cap!)} sub={`given up up to ${fmt(capTop!)}`} />
+        <div className={bare ? "grid grid-cols-2 content-start gap-2" : "grid grid-cols-2 gap-3 xl:grid-cols-4"}>
+          <Tile compact={bare} label="You put in" value={usd(cost)} sub={`includes ${usd(quote.feesUsd ?? 0)} in Gemini fees`} />
+          <Tile compact={bare} label="Income" value={<span className="text-gain">+{usd(income)}</span>} sub={`if it stays below ${fmt(cap!)}`} />
+          <Tile compact={bare} label="Chance you keep it" value={pct(belowCap)} sub={`${oneIn(belowCap)} by the market`} />
+          <Tile compact={bare} label="Gains stop at" value={fmt(cap!)} sub={`given up up to ${fmt(capTop!)}`} />
         </div>
       ) : kind === "collar" ? (
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <Tile label="You put in" value={usd(cost)} sub={`${usd(back)} comes back unless it passes ${fmt(cap!)}`} />
+        <div className={bare ? "grid grid-cols-2 content-start gap-2" : "grid grid-cols-2 gap-3 xl:grid-cols-4"}>
+          <Tile compact={bare} label="You put in" value={usd(cost)} sub={`${usd(back)} comes back unless it passes ${fmt(cap!)}`} />
           <Tile
+            compact={bare}
             label="Net cost"
             value={<span className="text-signal-violet">{usd(cost - back)}</span>}
             sub={floorAloneCost !== null ? `vs ${usd(floorAloneCost)} for the floor alone` : `if it ends ${fmt(floor!)}–${fmt(cap!)}`}
           />
-          <Tile label="Worst case protected" value={<span className="text-signal-violet">{signedUsd(worstWith)}</span>} sub={`vs ${signedUsd(worstAlone)} alone`} />
-          <Tile label="Gains stop at" value={fmt(cap!)} sub={`given up up to ${fmt(capTop!)}`} />
+          <Tile compact={bare} label="Worst case protected" value={<span className="text-signal-violet">{signedUsd(worstWith)}</span>} sub={`vs ${signedUsd(worstAlone)} alone`} />
+          <Tile compact={bare} label="Gains stop at" value={fmt(cap!)} sub={`given up up to ${fmt(capTop!)}`} />
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <Tile label="Costs" value={usd(cost)} sub={`includes ${usd(quote.feesUsd ?? 0)} in Gemini fees`} />
-          <Tile label="Worst case alone" value={signedUsd(worstAlone)} sub={`if it lands ${ladder.bucketLabels[alone.indexOf(worstAlone)].replace(/^Below/, "below")}`} />
-          <Tile label="Worst case protected" value={<span className="text-signal-violet">{signedUsd(worstWith)}</span>} sub={`down to ${fmt(downTo ?? floor!)}, cost included`} />
-          <Tile label="Pays out" value={`below ${fmt(floor!)}`} sub={`${pct(chance)} · ${oneIn(chance)} by the market`} />
+        <div className={bare ? "grid grid-cols-2 content-start gap-2" : "grid grid-cols-2 gap-3 xl:grid-cols-4"}>
+          <Tile compact={bare} label="Costs" value={usd(cost)} sub={`includes ${usd(quote.feesUsd ?? 0)} in Gemini fees`} />
+          <Tile compact={bare} label="Worst case alone" value={signedUsd(worstAlone)} sub={`if it lands ${ladder.bucketLabels[alone.indexOf(worstAlone)].replace(/^Below/, "below")}`} />
+          <Tile compact={bare} label="Worst case protected" value={<span className="text-signal-violet">{signedUsd(worstWith)}</span>} sub={`down to ${fmt(downTo ?? floor!)}, cost included`} />
+          <Tile compact={bare} label="Pays out" value={`below ${fmt(floor!)}`} sub={`${pct(chance)} · ${oneIn(chance)} by the market`} />
         </div>
       )}
+      </div>
 
+      {!bare && (
       <ul className="flex flex-col gap-2 rounded-[20px] bg-porcelain px-5 py-4 text-[14px] leading-relaxed text-inkstone">
         {cap !== null && (
           <li>
@@ -184,7 +207,38 @@ export function ProtectCard({
           {protection.units.toLocaleString("en-US", { maximumFractionDigits: 4 })} {name}.
         </li>
       </ul>
+      )}
     </section>
+  );
+}
+
+/** The fine print of a holding strategy, short, for its own panel beside the contracts. */
+export function ProtectNotes({ ladder, quote, protection, name }: { ladder: Ladder; quote: Omit<Quote, "raw">; protection: ProtectionInfo; name: string }) {
+  const fmt = (v: number) => formatValue(Math.round(v * 100) / 100, ladder.unit);
+  const kind: "floor" | "collar" | "covered" = protection.floor === null ? "covered" : protection.cap !== null && protection.backInMiddle !== null ? "collar" : "floor";
+  const cost = quote.stakeBase / 1e6;
+  const ev = quote.evUnderMarket;
+  const items: [string, string][] = [
+    [
+      kind === "covered" ? "Still costs a little on average." : "Insurance has a price.",
+      `By the market's odds it pays back ${usd(ev)} on average for its ${usd(cost)}: the gap is Gemini's fees and asking prices.`,
+    ],
+    ...(protection.floor !== null && protection.coveredDownTo !== null
+      ? ([[`It stops at ${fmt(protection.coveredDownTo)}.`, `The lowest price Gemini lists; losses below it aren't covered.`]] as [string, string][])
+      : []),
+    ...(protection.cap !== null
+      ? ([[`Gains stop at ${fmt(protection.cap)}.`, `Above ${fmt(protection.capTop ?? protection.cap)}, where the ladder ends, they count again.`]] as [string, string][])
+      : []),
+    [`It doesn't touch your ${name}.`, `It pays on where the price ends, sized for ${protection.units.toLocaleString("en-US", { maximumFractionDigits: 4 })} ${name}.`],
+  ];
+  return (
+    <ul className="flex flex-col gap-2 text-[13.5px] leading-snug text-inkstone">
+      {items.map(([b, t]) => (
+        <li key={b}>
+          <b>{b}</b> <span className="text-slate">{t}</span>
+        </li>
+      ))}
+    </ul>
   );
 }
 
@@ -197,6 +251,7 @@ function ProtectChart({
   cap = null,
   hover,
   onHover,
+  height = 240,
 }: {
   ladder: Ladder;
   alone: number[];
@@ -205,10 +260,11 @@ function ProtectChart({
   cap?: number | null;
   hover: number | null;
   onHover: (j: number | null) => void;
+  height?: number;
 }) {
   const { ref, width: measured } = useSize<HTMLDivElement>();
   const W = measured || 600;
-  const H = 240;
+  const H = height;
   const pad = { l: 56, r: 12, t: 16, b: 30 };
   const n = alone.length;
   const all = [...alone, ...withPos, 0];
@@ -241,7 +297,7 @@ function ProtectChart({
   };
 
   return (
-    <div ref={ref} className="mt-3 w-full select-none" style={{ height: H }}>
+    <div ref={ref} className="mt-2 w-full select-none" style={{ height: H }}>
       {measured > 0 && (
         <svg
           ref={svgRef}

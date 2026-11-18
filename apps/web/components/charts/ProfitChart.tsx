@@ -30,6 +30,8 @@ export interface ProfitChartProps {
   cuts?: number[] | null;
   /** The underlying's live price: a marker that glides along the x axis as the price ticks. */
   now?: { value: number; label: string } | null;
+  /** Draw the market's likely range as a bracket under the axis (it still sets the zoom either way). */
+  likelyBracket?: boolean;
 }
 
 /**
@@ -113,6 +115,7 @@ export function ProfitChart({
   outcomeLabel,
   cuts = null,
   now = null,
+  likelyBracket = true,
 }: ProfitChartProps) {
   const { ref, width: measured } = useSize<HTMLDivElement>();
   const width = measured || 600;
@@ -123,8 +126,12 @@ export function ProfitChart({
   // Where to look and how tall: the focus window, and a y-range fitted to the outcomes inside it.
   const [wa, wb] = useMemo(() => focusWindow(target, ordered, likely), [target, ordered, likely]);
   const inWindow = target.slice(wa, wb + 1);
-  const hiT = niceMax(Math.max(stake * 0.08, ...inWindow) * 1.12);
-  const loT = -niceMax(Math.max(stake * 0.08, ...inWindow.map((v) => -v)) * 1.12);
+  // One outcome paying far more than the rest (a cheap tail contract) would flatten every other bar.
+  // Then the scale fits the others, and that bar is drawn cut, with its true value written by it.
+  const gainsDesc = inWindow.filter((v) => v > 0).sort((a, b) => b - a);
+  const capAt = gainsDesc.length >= 3 && gainsDesc[1] > stake * 0.02 && gainsDesc[0] > 3 * gainsDesc[1] ? gainsDesc[1] * 1.6 : null;
+  const hiT = niceMax(Math.max(stake * 0.08, ...(capAt !== null ? [capAt] : inWindow)) * 1.04);
+  const loT = -niceMax(Math.max(stake * 0.08, ...inWindow.map((v) => -v)) * 1.04);
 
   // One timeline for everything that moves: bar heights, y-range and the zoom window glide together.
   const goal = useMemo(() => [...target, hiT, loT, wa, wb], [target, hiT, loT, wa, wb]);
@@ -139,8 +146,9 @@ export function ProfitChart({
   const nowGoal = showNow ? [outcomePosition(now!.value, cuts!)] : [];
   const nowU = useMorph(nowGoal, 700)[0] ?? 0;
 
-  const top = showNow ? 54 : 30;
-  const bottom = likely ? 62 : 36;
+  const top = 30;
+  const bracket = !!likely && likelyBracket;
+  const bottom = bracket ? 62 : 36;
   const left = MARGIN.left;
   const right = width - MARGIN.right;
   const step = (right - left) / Math.max(1, w1 - w0 + 1);
@@ -151,11 +159,19 @@ export function ProfitChart({
   const y = scaleLinear().domain([lo, hi]).range([height - bottom, top]);
   const y0 = y(0);
   const yBase = y(lo);
-  const ticks = scaleLinear().domain([loT, hiT]).ticks(4);
+  const ticks = scaleLinear().domain([loT, hiT]).ticks(height - top - bottom < 150 ? 2 : 4);
 
   const zones = runs(wins, (w) => w);
   // Boundaries where the position crosses from losing to winning (or back): the breakevens.
   const breakevens = ordered ? wins.map((w, j) => (j > 0 && w !== wins[j - 1] ? j : -1)).filter((j) => j > 0) : [];
+  // Zone edges and breakevens glide on the bars' spring while their count holds (as when a view is
+  // dragged), so the shading slides with the bars instead of blinking from one spot to the next.
+  // (On the render where the count changes, the spring still holds the old count: use the new edges.)
+  const zoneGoal = zones.flatMap(([a, b]) => [a, b + 1]);
+  const zoneMorph = useMorph(zoneGoal, 480);
+  const zoneEdges = zoneMorph.length === zoneGoal.length ? zoneMorph : zoneGoal;
+  const beMorph = useMorph(breakevens, 480);
+  const beAt = beMorph.length === breakevens.length ? beMorph : breakevens;
   const stride = ordered ? tickStride(wb - wa + 1, right - left, 52) : tickStride(n, right - left, 92);
   const visible = (px: number) => px >= left - 1 && px <= right + 1;
   // Edge notes: beyond the window the result doesn't change. Their measured width keeps the
@@ -164,6 +180,15 @@ export function ProfitChart({
   const hintLeft = ordered && wa > 0 ? `← same below ${cutLabels[wa - 1]}` : null;
   const hintRight = ordered && wb < n - 1 ? `same above ${cutLabels[wb]} →` : null;
   const zoneHalf = textWidth("Profit zone", 12.5) / 2;
+  // Cut bars (see capAt) get their true value in the top band, right over the bar; a "Profit zone"
+  // label that would collide with one steps aside (the shading still marks the zone).
+  const cutLabels2 = capAt === null ? [] : target.flatMap((v, j) => {
+    if (!(v > hiT * 1.001) || j < wa || j > wb) return [];
+    const text = money(v);
+    const half = textWidth(text, 12) / 2 + 3;
+    const cx = Math.min(right - half, Math.max(left + half, barX(j) + bw / 2));
+    return [{ j, text, cx, span: [cx - half, cx + half] as [number, number] }];
+  });
   const clearLeft = hintLeft ? left + 2 + textWidth(hintLeft, HINT_PX) + 10 + zoneHalf : -Infinity;
   const clearRight = hintRight ? right - 2 - textWidth(hintRight, HINT_PX) - 10 - zoneHalf : Infinity;
 
@@ -227,17 +252,17 @@ export function ProfitChart({
 
           <g clipPath={`url(#${clipId})`}>
             {/* profit zones */}
-            {zones.map(([a, b]) => {
-              const x0 = slotX(a);
-              const x1 = slotX(b + 1);
+            {zones.map((_, i) => {
+              const x0 = slotX(zoneEdges[2 * i] ?? 0);
+              const x1 = slotX(zoneEdges[2 * i + 1] ?? 0);
               // Keep the label inside its zone and clear of the "same below/above" notes on the same row.
               const lo = Math.max(Math.max(left, x0) + zoneHalf + 4, clearLeft);
               const hi = Math.min(Math.min(right, x1) - zoneHalf - 4, clearRight);
               const cx = Math.min(hi, Math.max(lo, (Math.max(left, x0) + Math.min(right, x1)) / 2));
               return (
-                <g key={`z${a}-${b}`} className="fade-in">
+                <g key={`z${i}`} className="fade-in">
                   <rect x={x0} y={top - 22} width={Math.max(0, x1 - x0)} height={yBase - top + 22} rx={12} fill={GAIN} fillOpacity={0.07} />
-                  {lo <= hi && (
+                  {lo <= hi && !cutLabels2.some(({ span }) => cx - zoneHalf < span[1] && span[0] < cx + zoneHalf) && (
                     <text x={cx} y={top - 8} textAnchor="middle" fontSize={12} fontWeight={700} fill={GAIN_DEEP}>
                       Profit zone
                     </text>
@@ -247,26 +272,31 @@ export function ProfitChart({
             })}
 
             {/* breakevens */}
-            {breakevens.map((j) => (
-              <line key={`b${j}`} className="fade-in" x1={slotX(j)} x2={slotX(j)} y1={top - 22} y2={yBase} stroke={COLORS.slate} strokeWidth={1.25} strokeDasharray="4 4" />
+            {breakevens.map((j, i) => (
+              <line key={`b${i}`} className="fade-in" x1={slotX(beAt[i] ?? j)} x2={slotX(beAt[i] ?? j)} y1={top - 22} y2={yBase} stroke={COLORS.slate} strokeWidth={1.25} strokeDasharray="4 4" />
             ))}
 
             {/* bars */}
             {pl.map((v, j) => {
               const x0 = barX(j);
               if (x0 + bw < left - step || x0 > right + step) return null;
-              const yv = y(v);
+              const cut = v > hi * 1.001; // past the top of a broken scale
+              const yv = cut ? top - 6 : y(v);
               const yy = Math.abs(yv - y0) < 2 ? (v >= 0 ? y0 - 2 : y0 + 2) : yv;
               const on = hover === j;
               const dim = hover !== null && !on;
               const fill = wins[j] ? (on ? GAIN_DEEP : GAIN) : on ? COLORS.slate : COLORS.ash;
               return (
-                <path
-                  key={j}
-                  d={bar(x0, y0, yy, bw, Math.min(4, bw / 3))}
-                  fill={fill}
-                  style={{ opacity: dim ? 0.4 : 1, transition: "opacity 260ms cubic-bezier(.22,.61,.36,1), fill 240ms ease" }}
-                />
+                <g key={j} style={{ opacity: dim ? 0.4 : 1, transition: "opacity 260ms cubic-bezier(.22,.61,.36,1)" }}>
+                  <path d={bar(x0, y0, yy, bw, Math.min(4, bw / 3))} fill={fill} style={{ transition: "fill 240ms ease" }} />
+                  {cut && (
+                    <>
+                      {/* the break: two slanted cuts across the bar, then its real value beside it */}
+                      <path d={`M${x0 - 1},${yy + 14} L${x0 + bw + 1},${yy + 9} M${x0 - 1},${yy + 19} L${x0 + bw + 1},${yy + 14}`} stroke={COLORS.white} strokeWidth={2} />
+
+                    </>
+                  )}
+                </g>
               );
             })}
 
@@ -289,7 +319,7 @@ export function ProfitChart({
             {hover !== null && hover < n && (
               <g pointerEvents="none">
                 <line x1={barX(hover) + bw / 2} x2={barX(hover) + bw / 2} y1={top - 22} y2={yBase} stroke={COLORS.ink} strokeWidth={1} strokeOpacity={0.35} />
-                <circle cx={barX(hover) + bw / 2} cy={y(pl[hover])} r={5} fill={COLORS.white} stroke={wins[hover] ? GAIN_DEEP : COLORS.ink} strokeWidth={2} />
+                <circle cx={barX(hover) + bw / 2} cy={Math.max(top - 6, y(pl[hover]))} r={5} fill={COLORS.white} stroke={wins[hover] ? GAIN_DEEP : COLORS.ink} strokeWidth={2} />
               </g>
             )}
           </g>
@@ -313,19 +343,38 @@ export function ProfitChart({
 
           {/* x axis: labels follow the zoom; breakevens always get theirs */}
           {ordered
-            ? cutLabels.map((l, i) => {
-                const px = slotX(i + 1);
-                if (!visible(px)) return null;
-                const isBe = breakevens.includes(i + 1);
-                const near = hover !== null && (hover === i || hover === i + 1);
-                if (!isBe && (i + 1 - wa) % stride !== 0) return null;
-                if (!isBe && breakevens.some((b) => Math.abs(b - (i + 1)) < stride)) return null;
-                return (
-                  <text key={i} x={px} y={yBase + 20} textAnchor="middle" fontSize={12.5} fontWeight={isBe ? 700 : 500} fill={isBe || near ? COLORS.ink : COLORS.smoke} className="tnum fade-in">
-                    {l}
-                  </text>
-                );
-              })
+            ? (() => {
+                // Breakevens get first claim on the axis, then the regular stride; a label is drawn
+                // only where it clears the ones already placed (and the "Now" pill).
+                const taken: [number, number][] = showNow ? [[pillX - 4, pillX + pillW + 4]] : [];
+                const cands = cutLabels
+                  .map((l, i) => ({ l, i, px: slotX(i + 1), isBe: breakevens.includes(i + 1) }))
+                  .filter((c) => visible(c.px) && (c.isBe || (c.i + 1 - wa) % stride === 0))
+                  .sort((a, b) => Number(b.isBe) - Number(a.isBe));
+                const row2: [number, number][] = [];
+                const hits = (list: [number, number][], sp: [number, number]) => list.some(([a, b]) => sp[0] < b && a < sp[1]);
+                const placed: ((typeof cands)[number] & { row: number })[] = [];
+                for (const c of cands) {
+                  const half = textWidth(c.l, 12.5) / 2 + 4;
+                  const span: [number, number] = [c.px - half, c.px + half];
+                  if (!hits(taken, span)) {
+                    taken.push(span);
+                    placed.push({ ...c, row: 0 });
+                  } else if (c.isBe && !bracket && !hits(row2, span)) {
+                    // a breakeven never goes unlabelled: it drops to a second row
+                    row2.push(span);
+                    placed.push({ ...c, row: 1 });
+                  }
+                }
+                return placed.map(({ l, i, px, isBe, row }) => {
+                  const near = hover !== null && (hover === i || hover === i + 1);
+                  return (
+                    <text key={i} x={px} y={yBase + 20 + row * 14} textAnchor="middle" fontSize={12.5} fontWeight={isBe ? 700 : 500} fill={isBe || near ? COLORS.ink : COLORS.smoke} className="tnum fade-in">
+                      {l}
+                    </text>
+                  );
+                });
+              })()
             : bucketLabels.map((l, j) =>
                 j % stride === 0 ? (
                   <text key={j} x={barX(j) + bw / 2} y={yBase + 20} textAnchor="middle" fontSize={12.5} fill={hover === j ? COLORS.ink : COLORS.smoke}>
@@ -333,6 +382,13 @@ export function ProfitChart({
                   </text>
                 ) : null,
               )}
+
+          {/* the true values of cut bars */}
+          {cutLabels2.map(({ j, text, cx }) => (
+            <text key={`cut${j}`} x={cx} y={top - 8} textAnchor="middle" fontSize={12} fontWeight={700} fill={GAIN_DEEP} className="tnum">
+              {text}
+            </text>
+          ))}
 
           {/* edges: beyond the window the result doesn't change, and the chart says so */}
           {hintLeft && (
@@ -351,20 +407,21 @@ export function ProfitChart({
             <g pointerEvents="none" aria-hidden="true">
               {nowSide === "in" && (
                 <>
-                  <line x1={nowX} x2={nowX} y1={26} y2={yBase} stroke={COLORS.violet} strokeWidth={1.5} />
+                  <line x1={nowX} x2={nowX} y1={top - 22} y2={yBase + 4} stroke={COLORS.violet} strokeWidth={1.5} />
                   <circle cx={nowX} cy={y0} r={7} fill={COLORS.violet} className="pulse-ring" />
                   <circle cx={nowX} cy={y0} r={4.5} fill={COLORS.violet} stroke={COLORS.white} strokeWidth={1.5} />
                 </>
               )}
-              <rect x={pillX} y={4} width={pillW} height={22} rx={11} fill={COLORS.violet} />
-              <text x={pillX + pillW / 2} y={19} textAnchor="middle" fontSize={12.5} fontWeight={700} fill={COLORS.white} className="tnum">
+              <rect x={pillX} y={yBase + 4} width={pillW} height={18} rx={9} fill={COLORS.violet} />
+              <text x={pillX + pillW / 2} y={yBase + 17} textAnchor="middle" fontSize={12.5} fontWeight={700} fill={COLORS.white} className="tnum">
                 {nowText}
               </text>
             </g>
           )}
 
           {/* market's likely range */}
-          {likely &&
+          {bracket &&
+            likely &&
             (() => {
               const x0 = Math.max(left, slotX(likely.from) + gap / 2);
               const x1 = Math.min(right, slotX(likely.to + 1) - gap / 2);

@@ -40,6 +40,8 @@ export interface RawEvent {
   status: string; // active | settled | closed ...
   expiryDate: string;
   volume?: string;
+  /** Traded in the last 24 hours (Gemini sends a number). */
+  volume24h?: string | number;
   template?: string | null;
   series?: string;
   sourceDetails?: { agency?: string; index?: string } | null;

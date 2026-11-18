@@ -1,19 +1,38 @@
 "use client";
 
-import { scaleLinear } from "d3-scale";
+import { scaleLinear, type ScaleLinear } from "d3-scale";
 import { area, curveMonotoneX, line } from "d3-shape";
-import { useId, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { bandScale, COLORS, MARGIN, niceMax, tickStride } from "./common";
 import { useSize } from "./useSize";
-import { useTweenedArray } from "./useTween";
+import { useTweenedArray, useTweenedNumber } from "./useTween";
 
 export interface ShapeDrag {
   /** Current center of the user's curve, in outcome units (for the handle). */
   center: number;
   onStart: () => void;
-  /** dValue: horizontal move in outcome units; dyPx: vertical move in pixels (up = negative). */
-  onMove: (dValue: number, dyPx: number) => void;
+  /**
+   * dValue: horizontal move since the drag began, in outcome units. peakRatio: how tall the curve's
+   * peak should be relative to its height when the drag began (above 1 = taller and narrower), so
+   * the peak rises and falls with the pointer.
+   */
+  onMove: (dValue: number, peakRatio: number) => void;
   onEnd: () => void;
+  /** Shown beside the handle while dragging, e.g. "Likely $71.20 – $75.60". */
+  readout?: string;
+}
+
+interface Gesture {
+  kind: "shape" | "paint";
+  /** Pointer position (client px) and chart position (svg px) when the gesture began. */
+  cx0: number;
+  cy0: number;
+  px0: number;
+  py0: number;
+  v0: number;
+  /** The y scale and the curve's peak when the drag began: the vertical gesture is read against these, not the live (animating) scale. */
+  y: ScaleLinear<number, number>;
+  peak0: number;
 }
 
 export interface ProbabilityChartProps {
@@ -43,14 +62,18 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
   const n = props.market.length;
   const market = useTweenedArray(props.market, 0.18);
   const youTarget = useMemo(() => props.you ?? null, [props.you]);
-  const youTween = useTweenedArray(youTarget ?? props.market, 0.3);
   const [draft, setDraft] = useState<number[] | null>(null);
+  const [dragging, setDragging] = useState(false);
+  // While the curve is being dragged it follows the pointer exactly; otherwise it eases to new shapes.
+  const youTween = useTweenedArray(youTarget ?? props.market, 0.3, dragging);
   const you = draft ?? (youTarget ? youTween : null);
 
-  const top = compact ? 10 : props.likely ? 56 : 24;
-  const bottom = compact ? 6 : 40;
+  // The band above the plot holds the hover readout; on a narrow chart it can take two lines.
+  const top = compact ? 10 : props.likely ? 46 : props.tooltip && width < 420 ? 46 : 24;
+  const bottom = compact ? 6 : 34;
   const x = useMemo(() => bandScale(n, width, editable ? 0.14 : 0), [n, width, editable]);
-  const yMax = useMemo(() => niceMax(Math.max(0.05, ...props.market, ...(props.you ?? [])) * 1.12), [props.market, props.you]);
+  // The y range glides when the curve outgrows it, instead of snapping the whole chart to a new scale.
+  const yMax = useTweenedNumber(niceMax(Math.max(0.05, ...props.market, ...(props.you ?? [])) * 1.12), 0.2);
   const y = useMemo(() => scaleLinear().domain([0, yMax]).range([height - bottom, top]), [yMax, height, top, bottom]);
   const bw = x.bandwidth();
   const left = MARGIN.left;
@@ -94,8 +117,16 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
     .curve(curveMonotoneX);
 
   // Pointer handling: drag-to-reshape (curve mode), paint bars (edit mode), hover everywhere.
-  const gesture = useRef<{ kind: "shape" | "paint"; x0: number; y0: number; v0: number } | null>(null);
-  const [dragging, setDragging] = useState(false);
+  const gesture = useRef<Gesture | null>(null);
+  // The latest pointer position, applied once per frame: pointers can report far more often than
+  // the screen redraws, and every applied move re-solves the position.
+  const pending = useRef<{ clientX: number; clientY: number } | null>(null);
+  const dragRef = useRef(drag);
+  dragRef.current = drag;
+  // Where the chart sat on screen when the gesture began. Cards above it can change height as the
+  // position updates; the page scrolls by the same amount so the chart never slides out from under
+  // the pointer.
+  const anchorTop = useRef<number | null>(null);
   const locate = (e: React.PointerEvent<SVGSVGElement>) => {
     const r = e.currentTarget.getBoundingClientRect();
     const px = e.clientX - r.left;
@@ -104,12 +135,74 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
     const v = Math.min(yMax, Math.max(0, y.invert(py)));
     return { px, py, j, v, inside: px >= left && px <= right };
   };
+  const applyShape = () => {
+    const g = gesture.current;
+    const p = pending.current;
+    const d = dragRef.current;
+    if (!g || g.kind !== "shape" || !p || !d || !valueToX) return;
+    pending.current = null;
+    // Read from how far the pointer moved, not where the chart is now, so a layout shift mid-drag
+    // can't jolt the curve.
+    const px = g.px0 + (p.clientX - g.cx0);
+    const py = g.py0 + (p.clientY - g.cy0);
+    const target = g.peak0 + (g.y.invert(py) - g.y.invert(g.py0));
+    d.onMove(valueToX.toV(px) - g.v0, Math.max(0.05 * g.peak0, target) / g.peak0);
+  };
+  const endGesture = () => {
+    const g = gesture.current;
+    if (!g) return;
+    if (g.kind === "shape") {
+      applyShape(); // the last position always lands
+      dragRef.current?.onEnd();
+    }
+    if (g.kind === "paint" && draft) props.onCommit?.(draft);
+    gesture.current = null;
+    pending.current = null;
+    anchorTop.current = null;
+    setDragging(false);
+    setDraft(null);
+  };
+  // During a gesture: each frame, apply the latest pointer position and hold the chart in place.
+  // rAF runs after React commits and before paint, so any shift is undone before it's ever seen.
+  useEffect(() => {
+    if (!dragging) return;
+    let raf = 0;
+    const tick = () => {
+      if (pending.current) applyShape();
+      const el = ref.current;
+      if (el && anchorTop.current !== null) {
+        const shift = el.getBoundingClientRect().top - anchorTop.current;
+        if (Math.abs(shift) > 0.5) window.scrollBy(0, shift);
+      }
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [dragging]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // The curve's peak, for the handle and the vertical drag. The two end outcomes are open-ended
+  // ("below $65", "above $84") and pile up a wide view's tails, so they don't count as its peak.
+  const peakOf = (vals: readonly number[]) => Math.max(1e-4, ...(vals.length > 4 ? vals.slice(1, -1) : vals));
 
   const yTicks = y.ticks(3);
   const ordered = cutLabels.length === n - 1;
   const stride = ordered ? tickStride(cutLabels.length, right - left, 58) : tickStride(n, right - left, 92);
-  const handle = drag && valueToX && you ? { hx: Math.min(right, Math.max(left, valueToX.toX(drag.center))), hy: y(Math.max(...you)) } : null;
+  const handle = drag && valueToX && you ? { hx: Math.min(right, Math.max(left, valueToX.toX(drag.center))), hy: y(peakOf(you)) } : null;
   const hoverYou = hover !== null && you ? you[hover] : null;
+  // The readout pill keeps showing the last outcome while it fades out, and is measured so it can be
+  // centered on the crosshair without running off either edge.
+  const lastHover = useRef(0);
+  if (hover !== null) lastHover.current = hover;
+  const tipAt = Math.min(n - 1, hover ?? lastHover.current);
+  const tipOn = hover !== null && !gesture.current;
+  const tipRef = useRef<HTMLDivElement>(null);
+  const [tipW, setTipW] = useState(0);
+  // Re-measured only when its text can change (another outcome, or the chart resized): measuring on
+  // every render would force a layout pass each frame of a drag.
+  useLayoutEffect(() => {
+    const w = tipRef.current?.offsetWidth ?? 0;
+    if (w !== tipW) setTipW(w);
+  }, [tipAt, tipOn, width, measured]); // eslint-disable-line react-hooks/exhaustive-deps
 
   return (
     <div ref={ref} className="relative w-full select-none" style={{ height }}>
@@ -122,42 +215,43 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
           className={editable ? "cursor-ns-resize touch-none" : drag ? (dragging ? "cursor-grabbing touch-none" : "cursor-grab touch-none") : "cursor-crosshair"}
           onPointerDown={(e) => {
             const p = locate(e);
-            if (!p.inside) return;
+            if (!p.inside || gesture.current) return;
+            const start = { cx0: e.clientX, cy0: e.clientY, px0: p.px, py0: p.py, y, peak0: peakOf(youTarget ?? []) };
             if (editable && you) {
               e.currentTarget.setPointerCapture(e.pointerId);
-              gesture.current = { kind: "paint", x0: p.px, y0: p.py, v0: 0 };
+              gesture.current = { kind: "paint", ...start, v0: 0 };
               const next = [...you];
               next[p.j] = p.v;
               setDraft(next);
               props.onDraft?.(next);
             } else if (drag && valueToX) {
               e.currentTarget.setPointerCapture(e.pointerId);
-              gesture.current = { kind: "shape", x0: p.px, y0: p.py, v0: valueToX.toV(p.px) };
-              setDragging(true);
+              gesture.current = { kind: "shape", ...start, v0: valueToX.toV(p.px) };
+              // A clean picture while reshaping: no crosshair or tooltip chasing the pointer.
+              onHover(null);
               drag.onStart();
-            }
+            } else return;
+            anchorTop.current = ref.current?.getBoundingClientRect().top ?? null;
+            setDragging(true);
           }}
           onPointerMove={(e) => {
-            const p = locate(e);
             const g = gesture.current;
+            if (g?.kind === "shape") {
+              pending.current = { clientX: e.clientX, clientY: e.clientY };
+              return;
+            }
+            const p = locate(e);
             if (g?.kind === "paint" && draft) {
               const next = [...draft];
               next[p.j] = p.v;
               setDraft(next);
               props.onDraft?.(next);
-            } else if (g?.kind === "shape" && drag && valueToX) {
-              drag.onMove(valueToX.toV(p.px) - g.v0, p.py - g.y0);
             }
             onHover(p.inside ? p.j : null);
           }}
-          onPointerUp={() => {
-            const g = gesture.current;
-            if (g?.kind === "paint" && draft) props.onCommit?.(draft);
-            if (g?.kind === "shape") drag?.onEnd();
-            gesture.current = null;
-            setDragging(false);
-            setDraft(null);
-          }}
+          onPointerUp={endGesture}
+          onPointerCancel={endGesture}
+          onLostPointerCapture={endGesture}
           onPointerLeave={() => !gesture.current && onHover(null)}
         >
           {/* grid */}
@@ -174,8 +268,8 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
           {/* likely range: a bracket label above the curves */}
           {props.likely && !compact && (
             <g>
-              <line x1={(x(props.likely.from) ?? 0) + 4} x2={(x(props.likely.to) ?? 0) + x.step() - 4} y1={32} y2={32} stroke={COLORS.ash} strokeWidth={1.5} strokeLinecap="round" />
-              <text x={((x(props.likely.from) ?? 0) + (x(props.likely.to) ?? 0) + x.step()) / 2} y={22} textAnchor="middle" fontSize={13} fill={COLORS.slate}>
+              <line x1={(x(props.likely.from) ?? 0) + 4} x2={(x(props.likely.to) ?? 0) + x.step() - 4} y1={26} y2={26} stroke={COLORS.ash} strokeWidth={1.5} strokeLinecap="round" />
+              <text x={((x(props.likely.from) ?? 0) + (x(props.likely.to) ?? 0) + x.step()) / 2} y={17} textAnchor="middle" fontSize={12.5} fill={COLORS.slate}>
                 {props.likely.label}
               </text>
             </g>
@@ -229,7 +323,7 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
                 transition: "transform 220ms cubic-bezier(.22,.61,.36,1), opacity 200ms ease",
               }}
             >
-              <line x1={0} x2={0} y1={top - 4} y2={y(0)} stroke={COLORS.ink} strokeOpacity={0.22} strokeWidth={1} strokeDasharray="3 3" />
+              <line x1={0} x2={0} y1={Math.max(0, top - 6)} y2={y(0)} stroke={COLORS.ink} strokeOpacity={0.22} strokeWidth={1} strokeDasharray="3 3" />
               {!editable && hover !== null && (
                 <circle cx={0} cy={y(market[hover])} r={4.5} fill={COLORS.white} stroke={COLORS.smoke} strokeWidth={2} style={{ transition: "cy 220ms cubic-bezier(.22,.61,.36,1)" }} />
               )}
@@ -239,11 +333,13 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
             </g>
           )}
 
-          {/* reshape handle at the peak of your curve */}
+          {/* reshape handle at the peak of your curve; while dragging, a guide down to the axis marks the center */}
           {handle && !compact && (
             <g pointerEvents="none">
+              {dragging && <line x1={handle.hx} x2={handle.hx} y1={handle.hy} y2={y(0)} stroke={COLORS.violet} strokeOpacity={0.45} strokeWidth={1.5} strokeDasharray="3 4" />}
               {!dragging && <circle cx={handle.hx} cy={handle.hy} r={9} fill={COLORS.violet} opacity={0.35} className="pulse-ring" />}
-              <circle cx={handle.hx} cy={handle.hy} r={dragging ? 12 : 9} fill={COLORS.white} stroke={COLORS.violet} strokeWidth={3} />
+              {dragging && <circle cx={handle.hx} cy={handle.hy} r={20} fill={COLORS.violet} fillOpacity={0.12} />}
+              <circle cx={handle.hx} cy={handle.hy} r={dragging ? 11 : 9} fill={COLORS.white} stroke={COLORS.violet} strokeWidth={3} style={{ transition: "r 160ms cubic-bezier(.2,.8,.2,1)" }} />
               <circle cx={handle.hx} cy={handle.hy} r={3} fill={COLORS.violet} />
             </g>
           )}
@@ -265,7 +361,7 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
               {ordered
                 ? cutLabels.map((l, i) =>
                     i % stride === 0 ? (
-                      <text key={i} x={left + (i + 1) * x.step() - (editable ? (x.step() - bw) / 2 : 0)} y={height - bottom + 24} textAnchor="middle" fontSize={13} fill={hover !== null && (hover === i || hover === i + 1) ? COLORS.ink : COLORS.smoke} className="tnum">
+                      <text key={i} x={left + (i + 1) * x.step() - (editable ? (x.step() - bw) / 2 : 0)} y={height - bottom + 21} textAnchor="middle" fontSize={12.5} fill={hover !== null && (hover === i || hover === i + 1) ? COLORS.ink : COLORS.smoke} className="tnum">
                         {l}
                       </text>
                     ) : null,
@@ -282,23 +378,35 @@ export function ProbabilityChart(props: ProbabilityChartProps) {
         </svg>
       )}
 
-      {/* drag hint */}
+      {/* drag hint, and while dragging a live readout of the view riding above the handle */}
       {handle && !compact && !dragging && hover === null && (
         <div className="pointer-events-none absolute text-[13px] text-signal-violet fade-up" style={{ left: Math.min(handle.hx + 16, width - 170), top: Math.max(0, handle.hy - 34) }}>
           Drag to reshape ↔ ↕
         </div>
       )}
-
-      {/* gliding tooltip */}
-      {hover !== null && props.tooltip && measured > 0 && !gesture.current && (
+      {handle && !compact && dragging && drag?.readout && (
         <div
-          className="pointer-events-none absolute left-0 top-0 z-10 w-[220px] rounded-2xl border border-mist bg-porcelain/95 px-4 py-3 text-[14px] backdrop-blur-sm"
+          className="tnum pointer-events-none absolute left-0 top-0 z-10 whitespace-nowrap rounded-full bg-signal-violet px-3 py-1 text-[13px] font-bold text-white shadow-md"
+          style={{ transform: `translate(calc(${Math.min(Math.max(handle.hx, left + 90), right - 90)}px - 50%), ${Math.max(0, handle.hy - 46)}px)` }}
+        >
+          {drag.readout}
+        </div>
+      )}
+
+      {/* Readout: a slim pill in the band above the plot, riding the crosshair, so it never covers the
+          curves it describes. Always mounted (faded out when idle) so it glides instead of popping. */}
+      {props.tooltip && measured > 0 && (
+        <div
+          ref={tipRef}
+          aria-hidden={tipOn ? undefined : true}
+          className="pointer-events-none absolute left-0 top-0 z-10 max-w-[calc(100%-8px)] rounded-[14px] border border-mist bg-porcelain/95 px-2.5 py-1 text-[12px] leading-[18px] sm:px-3 sm:text-[12.5px] shadow-[0_6px_18px_-8px_rgba(31,31,31,0.28)] backdrop-blur-sm"
           style={{
-            transform: `translate(${Math.min(Math.max(0, cx(hover) - 110), width - 220)}px, ${Math.max(0, y(Math.max(market[hover], hoverYou ?? 0)) - 128)}px)`,
-            transition: "transform 220ms cubic-bezier(.22,.61,.36,1)",
+            transform: `translate(${Math.min(Math.max(4, cx(tipAt) - tipW / 2), width - tipW - 4)}px, 0px)`,
+            opacity: tipOn ? 1 : 0,
+            transition: "transform 200ms cubic-bezier(.22,.61,.36,1), opacity 160ms ease",
           }}
         >
-          {props.tooltip(hover)}
+          {props.tooltip(tipAt)}
         </div>
       )}
     </div>

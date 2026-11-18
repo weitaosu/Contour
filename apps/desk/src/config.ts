@@ -9,7 +9,8 @@ export const config = {
   webOrigin: list(process.env.WEB_ORIGIN, ["http://localhost:3000"]),
   geminiBase: process.env.GEMINI_API_BASE ?? "https://api.gemini.com",
   executionMode: executionMode(),
-  marketCategories: list(process.env.MARKET_CATEGORIES, ["Crypto", "Weather", "Commodities", "Politics", "Economics", "Finance", "Economy"]),
+  /** Gemini categories to list; "*" (the default) means every category Gemini has. */
+  marketCategories: list(process.env.MARKET_CATEGORIES, ["*"]),
   categoricalAllowlist: list(process.env.CATEGORICAL_ALLOWLIST, []),
   quoteTtlMs: 30_000,
   acceptMaxQuoteAgeMs: 60_000,

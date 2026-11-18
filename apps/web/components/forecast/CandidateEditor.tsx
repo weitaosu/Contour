@@ -29,6 +29,7 @@ export function CandidateEditor({
   onChange,
   hover = null,
   onHover,
+  bare = false,
 }: {
   labels: string[];
   market: number[];
@@ -40,6 +41,8 @@ export function CandidateEditor({
   onChange: (weights: number[]) => void;
   hover?: number | null;
   onHover?: (i: number | null) => void;
+  /** Inside a workspace panel that already titles and frames it. */
+  bare?: boolean;
 }) {
   const order = market.map((p, i) => [p, i] as const).sort((a, b) => b[0] - a[0]).map(([, i]) => i);
   const [all, setAll] = useState(false);
@@ -67,18 +70,21 @@ export function CandidateEditor({
   };
 
   return (
-    <section className="card" aria-labelledby="odds-title">
-      <div>
-        <p className="eyebrow">Step 1 · Your outlook</p>
-        <h2 id="odds-title" className="card-title mt-1">
-          Who do you think the market has wrong?
-        </h2>
-        <p className="mt-1 max-w-2xl text-[14px] text-slate">
-          Exactly one wins. Tap whether each is more or less likely than the market says, or drag a bar to an exact chance. The rest adjust so it all adds up to 100%.
-        </p>
-      </div>
+    <section className={bare ? "" : "card"} aria-labelledby={bare ? undefined : "odds-title"} aria-label={bare ? "Your odds" : undefined}>
+      {!bare && (
+        <div>
+          <p className="eyebrow">Step 1 · Your outlook</p>
+          <h2 id="odds-title" className="card-title mt-1">
+            Who do you think the market has wrong?
+          </h2>
+          <p className="mt-1 max-w-2xl text-[14px] text-slate">
+            Exactly one wins. Tap whether each is more or less likely than the market says, or drag a bar to an exact chance. The rest adjust so it all adds up to 100%.
+          </p>
+        </div>
+      )}
 
-      <div className="mt-4 flex flex-wrap gap-2" role="group" aria-label="Quick starts">
+      <div className={bare ? "flex items-center justify-between gap-3" : "contents"}>
+      <div className={`${bare ? "gap-1.5" : "mt-4 gap-2"} flex flex-wrap`} role="group" aria-label="Quick starts">
         {quick.map((q) => {
           const on = q.key !== "reset" && sameW(q.w);
           const Icon = q.icon;
@@ -89,17 +95,20 @@ export function CandidateEditor({
               title={q.title}
               aria-pressed={q.key === "reset" ? undefined : on}
               onClick={() => onChange(q.w)}
-              className={`ease inline-flex items-center gap-2 rounded-full border px-4 py-2 text-[14px] font-bold ${
+              className={`ease inline-flex items-center rounded-full border font-bold ${bare ? "gap-1.5 px-3 py-1 text-[13px]" : "gap-2 px-4 py-2 text-[14px]"} ${
                 on ? "border-signal-violet bg-signal-violet text-white" : "border-mist bg-porcelain text-inkstone hover:border-ash"
               }`}
             >
-              <Icon size={15} strokeWidth={2} aria-hidden="true" />
-              {q.label}
+              <Icon size={bare ? 13 : 15} strokeWidth={2} aria-hidden="true" />
+              {bare && q.key === "reset" ? "Reset" : q.label}
             </button>
           );
         })}
       </div>
+      {bare && <span className="shrink-0 self-end text-[12.5px] text-smoke">Pays if it wins</span>}
+      </div>
 
+      {!bare && (
       <div className="mt-5 flex flex-wrap items-center justify-between gap-x-6 gap-y-1 text-[13px] text-slate">
         <span className="flex items-center gap-4">
           <span className="inline-flex items-center gap-1.5">
@@ -111,6 +120,7 @@ export function CandidateEditor({
         </span>
         <span className="text-smoke">Pays if it wins</span>
       </div>
+      )}
 
       <ul className="mt-1">
         {rows.map((i) => {
@@ -127,7 +137,7 @@ export function CandidateEditor({
               key={i}
               onMouseEnter={() => onHover?.(i)}
               onMouseLeave={() => onHover?.(null)}
-              className={`ease -mx-2 rounded-[14px] border-t border-mist px-2 py-3 first:border-t-0 ${on ? "bg-porcelain" : ""}`}
+              className={`ease -mx-2 rounded-[14px] border-t border-mist px-2 first:border-t-0 ${bare ? "py-1" : "py-3"} ${on ? (bare ? "bg-cloud" : "bg-porcelain") : ""}`}
             >
               <div className="flex items-baseline justify-between gap-3">
                 <span className={`min-w-0 truncate text-[15px] ${up ? "font-bold text-signal-violet" : down ? "text-slate" : "text-inkstone"}`} title={labels[i]}>
@@ -146,7 +156,7 @@ export function CandidateEditor({
                   <span className={`tnum w-[64px] text-right font-bold ${win ? "text-gain" : "text-inkstone"}`}>{usd(payouts[i], 0)}</span>
                 </span>
               </div>
-              <div className="mt-2 flex items-center gap-3">
+              <div className={`${bare ? "mt-1" : "mt-2"} flex items-center gap-3`}>
                 {/* the bar: a dark tick at the market's odds, violet to yours; drag or use ← → to set it */}
                 <div
                   role="slider"
@@ -227,7 +237,18 @@ export function CandidateEditor({
         </button>
       )}
 
-      {belief.every((b, i) => Math.abs(b - market[i]) < 0.0005) ? (
+      {bare ? (
+        // In the workspace, the result panel already says when there's nothing to trade.
+        <p
+          className="mt-1.5 truncate text-[12.5px] leading-snug text-smoke"
+          title="Exactly one outcome wins. Each arrow moves that outcome's odds 1.75× against the rest (3× for a double step), or drag its bar to an exact chance. Payouts are for your whole position."
+        >
+          <span className="mr-1 inline-block h-3 w-[2px] translate-y-[2px] rounded-full bg-inkstone" aria-hidden="true" />
+          market
+          <span className="ml-2 mr-1 inline-block h-2 w-3.5 rounded-full bg-signal-violet" aria-hidden="true" />
+          you · each arrow moves its odds 1.75× vs the rest, or drag its bar
+        </p>
+      ) : belief.every((b, i) => Math.abs(b - market[i]) < 0.0005) ? (
         <p className="mt-4 rounded-2xl bg-porcelain px-4 py-3 text-[14px] text-slate">
           Your odds match the market&apos;s, so there&apos;s nothing to trade yet. Tap ▲ on an outcome you believe in, or start with &quot;Favorite wins&quot; or &quot;An upset&quot;.
         </p>

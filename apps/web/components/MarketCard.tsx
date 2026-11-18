@@ -1,12 +1,13 @@
 "use client";
 
 import Link from "next/link";
-import { useEffect, useId, useState } from "react";
+import { useEffect, useId, useState, ViewTransition } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import { scaleLinear } from "d3-scale";
 import { area, curveMonotoneX, line } from "d3-shape";
 import { ArrowRight } from "lucide-react";
-import type { MarketSummary } from "@/lib/desk";
-import { pct, settleLabel, settleShort, untilLabel, usd } from "@/lib/format";
+import { desk, type MarketSummary } from "@/lib/desk";
+import { pct, settleLabel, untilLabel, usd } from "@/lib/format";
 import { COLORS } from "./charts/common";
 import { useSize } from "./charts/useSize";
 
@@ -107,18 +108,18 @@ function CategoricalBars({ m, hovered }: { m: MarketSummary; hovered: boolean })
   const rows = m.marketProb
     .map((p, j) => ({ p, label: m.bucketLabels[j] }))
     .sort((a, b) => b.p - a.p)
-    .slice(0, 4);
+    .slice(0, 3);
   const scaleMax = Math.max(...rows.map((r) => r.p), focus?.yourProb ?? 0) * 1.05;
   const w = (v: number) => `${(v / scaleMax) * 100}%`;
   return (
-    <div className="flex flex-col gap-3 py-1">
+    <div className="flex flex-col gap-2">
       {rows.map((r) => {
         const isFocus = r.label === focus?.label;
         const add = isFocus && focus ? focus.yourProb - r.p : 0;
         return (
           <div
             key={r.label}
-            className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1.5 text-[14px]"
+            className="grid grid-cols-[1fr_auto] items-center gap-x-3 gap-y-1 text-[13.5px]"
             style={{ opacity: hovered && !isFocus ? 0.5 : 1, transition: `opacity 450ms ${EASE}` }}
           >
             <span className={`truncate ${isFocus ? "font-bold text-inkstone" : "text-inkstone"}`}>{r.label}</span>
@@ -134,7 +135,7 @@ function CategoricalBars({ m, hovered }: { m: MarketSummary; hovered: boolean })
             </span>
             <span
               className="relative col-span-2 block overflow-hidden rounded-full bg-mist"
-              style={{ height: isFocus && hovered ? 10 : 8, transition: `height 400ms ${EASE}` }}
+              style={{ height: isFocus && hovered ? 8 : 6, transition: `height 400ms ${EASE}` }}
             >
               <span className="absolute inset-y-0 left-0 rounded-full bg-ash" style={{ width: w(r.p) }} />
               {isFocus && add > 0 && (
@@ -155,16 +156,6 @@ function CategoricalBars({ m, hovered }: { m: MarketSummary; hovered: boolean })
           </div>
         );
       })}
-      {focus && (
-        <span className="flex items-center gap-4 text-[12.5px] text-smoke">
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-3 rounded-full bg-ash" /> Market odds
-          </span>
-          <span className="inline-flex items-center gap-1.5">
-            <span className="h-2 w-3 rounded-full bg-signal-violet" /> Extra odds in the example view
-          </span>
-        </span>
-      )}
     </div>
   );
 }
@@ -205,83 +196,105 @@ function CountValue({ initial, target }: { initial: number; target: number }) {
   return <span className="tnum">{pct(v)}</span>;
 }
 
+/**
+ * A market in the same visual language as the panels inside: a grey panel with the market's curve
+ * and an example view over it. On hover it lifts into the "focus" style of the panels you work in
+ * (white, violet ring), which is where it takes you.
+ */
 export function MarketCard({ m }: { m: MarketSummary }) {
   const [hovered, setHovered] = useState(false);
+  const qc = useQueryClient();
+  // Pointing at a card loads its market, so opening it shows the page at once (no skeleton) and
+  // the title can morph straight from the card into the page.
+  const prefetch = () => qc.prefetchQuery({ queryKey: ["ladder", m.ticker], queryFn: () => desk.ladder(m.ticker), staleTime: 20_000 });
   const soon = new Date(m.expiry).getTime() - Date.now() < 24 * 3600_000;
   const t = m.teaser;
-  const kind = m.kind === "threshold" ? `${m.strikeCount} strikes` : m.kind === "categorical" ? `${m.bucketCount} candidates` : `${m.bucketCount} ranges`;
+  const kind = m.kind === "threshold" ? `${m.strikeCount} strikes` : m.kind === "categorical" ? `${m.bucketCount} outcomes` : `${m.bucketCount} ranges`;
+  const money = (v: number) => `$${v >= 10_000 ? `${Math.round(v / 1000)}k` : Math.round(v).toLocaleString("en-US")}`;
+  // Recent activity, as the front page ranks by it; the lifetime total is in the hover hint.
+  const vol = m.volume24h ? `${money(m.volume24h)} in 24h` : m.volume24h === 0 ? "quiet today" : m.volume ? `${money(m.volume)} traded` : null;
   return (
     <Link
       href={`/m/${m.ticker}`}
-      onMouseEnter={() => setHovered(true)}
+      transitionTypes={["nav-forward"]}
+      onMouseEnter={() => {
+        setHovered(true);
+        prefetch();
+      }}
       onMouseLeave={() => setHovered(false)}
-      onFocus={() => setHovered(true)}
+      onTouchStart={prefetch}
+      onFocus={() => {
+        setHovered(true);
+        prefetch();
+      }}
       onBlur={() => setHovered(false)}
-      className="card group flex flex-col gap-4 !p-6 transition-[transform,background-color] duration-500 ease-[cubic-bezier(.22,.61,.36,1)] hover:-translate-y-0.5 hover:bg-[#f3f2fe]"
+      style={{ transition: "translate var(--spring-ms) var(--spring), background-color 240ms ease, box-shadow 320ms ease" }}
+      className="group flex min-w-0 flex-col gap-3 rounded-[24px] bg-cloud p-4 hover:-translate-y-0.5 hover:bg-porcelain hover:shadow-[0_0_0_1.5px_rgba(89,79,244,0.28),0_12px_32px_-14px_rgba(89,79,244,0.45)] focus-visible:outline-none focus-visible:shadow-[0_0_0_2px_rgba(89,79,244,0.6)]"
     >
-      <div className="flex items-center justify-between gap-3">
-        <span className="eyebrow truncate" title={settleLabel(m.expiry)}>Settles {settleShort(m.expiry)}</span>
+      <div className="flex items-start justify-between gap-3">
+        {/* the same name as the market page's title: opening the card morphs one into the other */}
+        <ViewTransition name={`market-title-${m.ticker}`} share="morph" default="none">
+          <h3 className="line-clamp-2 min-w-0 text-[16px] font-bold leading-snug text-inkstone">{m.title}</h3>
+        </ViewTransition>
         {m.sample ? (
-          <span className="tag !border !border-dashed !border-ash !bg-transparent !py-0.5 !text-[13px] text-slate">Sample · made-up prices</span>
+          <span className="shrink-0 rounded-full border border-dashed border-ash px-2 py-0.5 text-[12px] text-slate">Sample</span>
         ) : (
-          <span className={`tag tnum !py-0.5 !text-[13px] ${soon ? "tag-active" : "tag-white"}`}>{untilLabel(m.expiry)}</span>
+          <span
+            className={`tnum shrink-0 rounded-full px-2 py-0.5 text-[12px] ${soon ? "bg-signal-violet text-white" : "bg-porcelain text-inkstone group-hover:bg-cloud"}`}
+            title={`Settles ${settleLabel(m.expiry)}`}
+          >
+            {untilLabel(m.expiry).replace(/^in /, "")}
+          </span>
         )}
       </div>
-      <div>
-        <h3 className="card-title ease text-inkstone group-hover:text-signal-violet">{m.title}</h3>
-        {m.readout.center ? (
-          <p className="mt-1 text-[14px] text-slate">
-            Market says <span className="tnum font-bold text-inkstone">{m.readout.center}</span> <span className="tnum">± {m.readout.spread}</span>
-          </p>
-        ) : m.readout.leader ? (
-          <p className="mt-1 text-[14px] text-slate">
-            Market favourite: <span className="font-bold text-inkstone">{m.readout.leader}</span> · <span className="tnum">{pct(m.readout.leaderProb ?? 0)}</span> chance
-          </p>
-        ) : null}
-      </div>
+      {m.readout.center ? (
+        <p className="-mt-1.5 text-[13.5px] text-slate">
+          Market says <span className="tnum font-bold text-inkstone">{m.readout.center}</span> <span className="tnum">± {m.readout.spread}</span>
+        </p>
+      ) : m.readout.leader ? (
+        <p className="-mt-1.5 truncate text-[13.5px] text-slate">
+          Favourite <span className="font-bold text-inkstone">{m.readout.leader}</span> · <span className="tnum">{pct(m.readout.leaderProb ?? 0)}</span>
+        </p>
+      ) : null}
 
       {m.kind === "categorical" ? (
         <CategoricalBars m={m} hovered={hovered} />
       ) : (
-        <CardChart market={m.marketProb} view={t?.belief ?? null} payouts={t?.trade ? t.payouts : null} hovered={hovered} />
+        <CardChart market={m.marketProb} view={t?.belief ?? null} payouts={t?.trade ? t.payouts : null} hovered={hovered} height={60} />
       )}
 
-      {m.kind === "categorical" && t?.focus ? (
-        <div className="rounded-2xl bg-porcelain px-4 py-3 text-[14px] leading-snug">
+      {/* What an example view gets, in one line: the same numbers the panels inside lead with */}
+      <div className="rounded-[14px] bg-porcelain px-3 py-2 text-[13px] leading-snug group-hover:bg-cloud">
+        {m.kind === "categorical" && t?.focus ? (
           <span className="text-slate">
-            Think <b className="text-inkstone">{t.focus.label}</b> is underrated? Say{" "}
-            <b className="tnum text-signal-violet">{pct(t.focus.yourProb)}</b> instead of <span className="tnum">{pct(t.focus.marketProb)}</span>:
+            Rate <b className="text-inkstone">{t.focus.label}</b> <b className="tnum text-signal-violet">{pct(t.focus.yourProb)}</b> (market{" "}
+            <span className="tnum">{pct(t.focus.marketProb)}</span>): $100 pays <b className="tnum text-signal-violet">{usd(t.focus.paysIfWins, 0)}</b> if so, at least{" "}
+            <b className="tnum text-inkstone">{usd(t.worst, 0)}</b>
           </span>
-          <span className="mt-1 block text-inkstone">
-            $100 pays <b className="tnum text-signal-violet">{usd(t.focus.paysIfWins, 0)}</b> if that happens, at least <b className="tnum">{usd(t.worst, 0)}</b> otherwise.
-          </span>
-        </div>
-      ) : t?.trade ? (
-        <div className="flex items-center justify-between gap-3 rounded-2xl bg-porcelain px-4 py-3">
-          <div className="text-[14px] leading-tight">
-            <span className="text-slate">Example view, $100</span>
-            <span className="mt-0.5 block tnum font-bold text-inkstone">
+        ) : t?.trade ? (
+          <span className="tnum grid grid-cols-[1fr_auto] gap-x-3">
+            <span className="text-[12px] text-smoke">Example $100 view gets back</span>
+            <span className="text-right text-[12px] text-smoke">profit if right</span>
+            <span className="font-bold text-inkstone">
               {usd(t.worst, 0)} – <span className="text-signal-violet">{usd(t.best, 0)}</span>
             </span>
-          </div>
-          <div className="text-right text-[14px] leading-tight">
-            <span className="text-slate">profit if right</span>
-            <span className="mt-0.5 block tnum font-bold text-signal-violet">{pct(t.probProfitYou)}</span>
-          </div>
-        </div>
-      ) : (
-        <div className="rounded-2xl bg-porcelain px-4 py-3 text-[14px] text-slate">
-          {m.kind === "categorical" ? "Set a probability for each outcome and trade the whole field." : "Tight market: bring a sharper view to find an edge."}
-        </div>
-      )}
+            <span className="text-right font-bold text-signal-violet">{pct(t.probProfitYou)}</span>
+          </span>
+        ) : (
+          <span className="text-slate">{m.kind === "categorical" ? "Set your own odds for each outcome and trade the whole field." : "A tight market: bring a sharper view to find an edge."}</span>
+        )}
+      </div>
 
-      <div className="mt-auto flex items-center justify-between gap-2">
-        <span className="truncate whitespace-nowrap text-[13px] text-smoke tnum" title={`${m.quotedCount} quoted`}>
+      <div className="mt-auto flex items-center justify-between gap-2 text-[12.5px]">
+        <span
+          className="tnum truncate text-smoke"
+          title={`${m.volume ? `${money(m.volume)} traded since it listed · ` : ""}${m.quotedCount} quoted · settles ${settleLabel(m.expiry)}`}
+        >
+          {vol ? `${vol} · ` : ""}
           {kind}
-          {m.volume ? ` · $${m.volume >= 10_000 ? `${Math.round(m.volume / 1000)}k` : Math.round(m.volume).toLocaleString("en-US")} traded` : ""}
         </span>
-        <span className="inline-flex max-w-0 shrink-0 items-center gap-1 overflow-hidden whitespace-nowrap text-[14px] font-bold text-signal-violet opacity-0 transition-[max-width,opacity] duration-500 ease-[cubic-bezier(.22,.61,.36,1)] group-hover:max-w-[160px] group-hover:opacity-100 group-focus-visible:max-w-[160px] group-focus-visible:opacity-100">
-          Shape your view <ArrowRight size={16} strokeWidth={2} />
+        <span className="inline-flex shrink-0 items-center gap-1 font-bold text-signal-violet opacity-0 transition-opacity duration-300 group-hover:opacity-100 group-focus-visible:opacity-100">
+          Shape your view <ArrowRight size={14} strokeWidth={2.25} />
         </span>
       </div>
     </Link>

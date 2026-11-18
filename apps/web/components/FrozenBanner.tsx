@@ -1,7 +1,17 @@
 import { FlaskConical, Snowflake } from "lucide-react";
 
 /** Marks a made-up demo market, so nobody mistakes its prices for a real exchange's. */
-export function SampleBanner({ className = "" }: { className?: string }) {
+export function SampleBanner({ className = "", compact = false }: { className?: string; compact?: boolean }) {
+  if (compact)
+    return (
+      <div role="status" className={`flex items-center gap-2.5 rounded-[16px] border border-dashed border-ash bg-cloud px-4 py-2 text-[13.5px] text-inkstone ${className}`}>
+        <FlaskConical size={16} strokeWidth={1.75} className="shrink-0 text-signal-violet" aria-hidden="true" />
+        <p className="min-w-0">
+          <b>Sample market with made-up prices.</b>{" "}
+          <span className="text-slate">Modeled on the Fed rate-decision markets exchanges list before each FOMC meeting; it can&apos;t be traded.</span>
+        </p>
+      </div>
+    );
   return (
     <div role="status" className={`flex items-start gap-3 rounded-[20px] border border-dashed border-ash bg-cloud px-5 py-4 text-left text-[15px] text-inkstone ${className}`}>
       <FlaskConical size={20} strokeWidth={1.75} className="mt-0.5 shrink-0 text-signal-violet" aria-hidden="true" />

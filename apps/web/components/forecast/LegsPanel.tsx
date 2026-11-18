@@ -1,14 +1,55 @@
 "use client";
 
+import { memo } from "react";
 import type { Quote } from "@contour/core";
 import { cents, qty, usd } from "@/lib/format";
 
 /** The contracts (and escrowed cash) behind a position, with where the prices come from. */
-export function LegsTable({ quote, paper, crossed }: { quote: Omit<Quote, "raw">; paper: boolean; crossed: string[] }) {
+export const LegsTable = memo(function LegsTable({ quote, paper, crossed, compact = false }: { quote: Omit<Quote, "raw">; paper: boolean; crossed: string[]; compact?: boolean }) {
+  if (compact) {
+    const total = quote.legs.reduce((a, l) => a + l.usd, 0) + quote.cashUsd;
+    return (
+      <div>
+        <table className="w-full text-[13px] leading-[19px]" title={crossed.length ? `Crossed quotes skipped: ${crossed.join(", ")}` : undefined}>
+          <thead>
+            <tr className="text-left text-[12.5px] text-smoke">
+              <th className="pb-1 font-medium">Contract</th>
+              <th className="pb-1 text-right font-medium">Qty × price</th>
+              <th className="pb-1 text-right font-medium">Cost</th>
+            </tr>
+          </thead>
+          <tbody className="text-inkstone">
+            {quote.legs.map((l) => (
+              <tr key={`${l.symbol}-${l.side}`} className="border-t border-mist">
+                <td className="py-[2px]">
+                  <span className="mr-1.5 rounded-full bg-mist px-1.5 py-px text-[11px] font-bold">{l.side.toUpperCase()}</span>
+                  {l.label}
+                </td>
+                <td className="tnum py-[2px] text-right text-slate">
+                  {qty(l.qty)} × {cents(l.price)}
+                </td>
+                <td className="tnum py-[2px] text-right">{usd(l.usd)}</td>
+              </tr>
+            ))}
+            <tr className="border-t border-mist">
+              <td className="py-[2px]" colSpan={2}>
+                <b>Total</b>{" "}
+                <span className="text-slate">
+                  incl. {usd(quote.cashUsd)} cash in escrow · {usd(quote.feesUsd)} fees
+                </span>
+              </td>
+              <td className="tnum py-[2px] text-right font-bold">{usd(total)}</td>
+            </tr>
+          </tbody>
+        </table>
+
+      </div>
+    );
+  }
   return (
     <div>
       <div className="overflow-x-auto">
-        <table className="w-full min-w-[420px] text-[14px]">
+        <table className="w-full text-[13px] sm:text-[14px]">
           <thead>
             <tr className="text-left text-smoke">
               <th className="pb-2 font-medium">Side</th>
@@ -62,4 +103,4 @@ export function LegsTable({ quote, paper, crossed }: { quote: Omit<Quote, "raw">
       </p>
     </div>
   );
-}
+});

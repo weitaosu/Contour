@@ -2,57 +2,80 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { History, LayoutGrid, Trophy } from "lucide-react";
+import { useSlidingPill } from "./ui/SlidingPill";
 import { useQuery } from "@tanstack/react-query";
 import { Logo } from "./Logo";
 import { WalletButton } from "./WalletButton";
 import { desk } from "@/lib/desk";
 
 const links = [
-  { href: "/", label: "Markets" },
-  { href: "/me", label: "Record" },
-  { href: "/replay", label: "Replay" },
+  { href: "/", label: "Markets", icon: LayoutGrid, hint: "Every market you can trade as one curve" },
+  { href: "/me", label: "Record", icon: Trophy, hint: "Your forecast record, kept with your wallet" },
+  { href: "/replay", label: "Replay", icon: History, hint: "Past markets replayed: one contract versus the whole view" },
 ];
+
+const isActive = (href: string, path: string) => (href === "/" ? path === "/" || path.startsWith("/m/") : path.startsWith(href));
+
+/**
+ * The three pages as one segmented control, like the pickers inside the app: a grey track, the
+ * current page a white pill. Every item has the same box, so nothing shifts when it's selected.
+ */
+function PageSwitch({ path, full = false }: { path: string; full?: boolean }) {
+  const current = links.find((l) => isActive(l.href, path))?.href ?? null;
+  const { track, pill } = useSlidingPill(current);
+  return (
+    <nav aria-label="Pages" ref={track} className={`relative ${full ? "grid grid-cols-3" : "flex"} items-center gap-0.5 rounded-full bg-cloud p-1`}>
+      {pill}
+      {links.map(({ href, label, icon: Icon, hint }) => {
+        const on = isActive(href, path);
+        return (
+          <Link
+            key={href}
+            href={href}
+            title={hint}
+            aria-current={on ? "page" : undefined}
+            data-active={on}
+            className={`ease relative inline-flex items-center justify-center gap-1.5 rounded-full px-3.5 py-1.5 text-[14px] font-bold leading-none ${
+              on ? "text-inkstone" : "text-slate hover:text-inkstone"
+            }`}
+          >
+            <Icon size={15} strokeWidth={2.1} className={on ? "text-signal-violet" : ""} aria-hidden="true" />
+            {label}
+          </Link>
+        );
+      })}
+    </nav>
+  );
+}
 
 export function Nav() {
   const path = usePathname();
   const cfg = useQuery({ queryKey: ["config"], queryFn: desk.config, staleTime: 60_000 });
   const mode = cfg.data?.executionMode ?? "paper";
+  // The front page and market pages are full-width workspaces; the bar lines up with them there.
+  const wide = path === "/" || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/replay");
   return (
-    <header className="sticky top-0 z-30 border-b border-mist bg-porcelain">
-      <div className="page flex h-[72px] items-center gap-6">
+    // Named, so page transitions leave it in place: the content moves, the bar stays.
+    <header className="sticky top-0 z-30 border-b border-mist bg-porcelain" style={{ viewTransitionName: "site-header" }}>
+      {/* Market pages are a full-width workspace; the bar lines up with it there. */}
+      <div className={`flex h-[72px] items-center gap-6 ${wide ? "mx-auto max-w-[1680px] px-4 md:px-6" : "page"}`}>
         <Link href="/" aria-label="Contour home">
           <Logo />
         </Link>
-        <nav className="hidden flex-1 items-center justify-center gap-1 md:flex">
-          {links.map((l) => {
-            const active = l.href === "/" ? path === "/" || path.startsWith("/m/") : path.startsWith(l.href);
-            return (
-              <Link
-                key={l.href}
-                href={l.href}
-                className={`rounded-full px-4 py-2 ${active ? "text-inkstone" : "text-slate hover:text-inkstone"}`}
-                aria-current={active ? "page" : undefined}
-              >
-                {l.label}
-                {active && <span className="mx-auto mt-1 block h-[2px] w-5 rounded-full bg-signal-violet" />}
-              </Link>
-            );
-          })}
-        </nav>
-        <div className="ml-auto flex items-center gap-3 md:ml-0">
+        <div className="hidden md:block">
+          <PageSwitch path={path} />
+        </div>
+        <div className="ml-auto flex items-center gap-3">
           <span className="tag hidden sm:inline-flex" title="Fills are simulated at live Gemini quotes">
             {mode === "paper" ? "Paper mode" : mode === "sandbox" ? "Sandbox" : "Live"}
           </span>
           <WalletButton />
         </div>
       </div>
-      <nav className="page flex gap-1 pb-2 md:hidden">
-        {links.map((l) => (
-          <Link key={l.href} href={l.href} className={`tag ${path === l.href ? "tag-active" : "tag-white"}`}>
-            {l.label}
-          </Link>
-        ))}
-      </nav>
+      <div className={`pb-2 md:hidden ${wide ? "px-4" : "page"}`}>
+        <PageSwitch path={path} full />
+      </div>
     </header>
   );
 }

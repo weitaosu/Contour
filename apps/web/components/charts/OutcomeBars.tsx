@@ -43,8 +43,9 @@ export function OutcomeBars({
   const zero = pos(0);
 
   return (
-    <div>
-      <ul className="flex flex-col" aria-label="Profit or loss if each outcome wins">
+    // Fills whatever height it's given, the rows spread evenly down it.
+    <div className="flex h-full flex-col">
+      <ul className="flex flex-1 flex-col justify-evenly" aria-label="Profit or loss if each outcome wins">
         {rows.map((i) => {
           const v = pl[i];
           const left = Math.min(zero, pos(v));
@@ -56,7 +57,7 @@ export function OutcomeBars({
               onMouseEnter={() => onHover(i)}
               onMouseLeave={() => onHover(null)}
               onClick={() => onHover(i)}
-              className={`ease grid cursor-default grid-cols-[minmax(0,2fr)_minmax(0,3fr)_4.75rem] items-center gap-3 rounded-[12px] px-2 py-1.5 ${on ? "bg-cloud" : ""}`}
+              className={`ease grid cursor-default grid-cols-[minmax(0,2fr)_minmax(0,3fr)_4.75rem] items-center gap-3 rounded-[12px] px-2 py-1.5 ${on ? "bg-porcelain" : ""}`}
             >
               <span className={`truncate text-[14px] ${wins[i] ? "font-bold text-inkstone" : "text-slate"}`} title={labels[i]}>
                 {labels[i]}

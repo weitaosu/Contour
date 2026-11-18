@@ -25,6 +25,8 @@ export interface ContractLike {
   priceIncrement?: string;
   resolutionSide?: "yes" | "no";
   settlementValue?: string;
+  /** The contract's rules (Gemini sends rich text); read only for an explicit "mutually exclusive" statement. */
+  description?: unknown;
 }
 
 export const MAX_BUCKETS = 40;
@@ -54,30 +56,73 @@ const num = (v: string | null | undefined): number | null => {
   return Number.isFinite(n) ? n : null;
 };
 
-const RANGE_RE = /(-?\d+(?:\.\d+)?)\D+?\bto\b\D*?(-?\d+(?:\.\d+)?)/i;
+// Label numbers may carry thousands separators ("7,600 to 7,799.99"). The regexes capture them with
+// commas; `labelNum` strips the commas and `step` reads the precision the label is written to.
+const NUM = "(-?\\d[\\d,]*(?:\\.\\d+)?)";
+const RANGE_RE = new RegExp(`${NUM}\\D+?\\bto\\b\\D*?${NUM}`, "i");
+const BELOW_RE = new RegExp(`${NUM}[^\\d]*?\\bor (?:below|less|lower)\\b`, "i");
+const ABOVE_RE = new RegExp(`${NUM}[^\\d]*?\\bor (?:above|more|higher)\\b`, "i");
+const labelNum = (s: string) => Number(s.replace(/,/g, ""));
+/** The smallest step a label number is written to: "59" → 1, "2.5" → 0.1, "7,599.99" → 0.01. */
+const step = (s: string) => {
+  const d = s.split(".")[1]?.length ?? 0;
+  return 10 ** -d;
+};
 
 interface ParsedBucket {
   c: ContractLike;
   lo: number | null; // inclusive, null = -inf
   hi: number | null; // inclusive, null = +inf
+  /** Precision each bound is written to, for checking that the next range starts right after this one. */
+  hiStep?: number;
+  loStep?: number;
+  /** The gap from this range's end to the next one's start (the finer of the two precisions). */
+  gap?: number;
 }
 
-const BELOW_RE = /(-?\d+(?:\.\d+)?)[^\d]*?\bor (?:below|less|lower)\b/i;
-const ABOVE_RE = /(-?\d+(?:\.\d+)?)[^\d]*?\bor (?:above|more|higher)\b/i;
-
 /** Bucket role of a contract: from `strike` when present, else from its label. */
-function bucketRole(c: ContractLike): { role: "below" | "above" | "range"; lo?: number; hi?: number } | null {
+function bucketRole(c: ContractLike): { role: "below" | "above" | "range"; lo?: number; hi?: number; hiStep?: number; loStep?: number } | null {
   const t = c.strike?.type;
-  if (t === "below") return { role: "below", hi: num(c.strike!.value) ?? undefined };
-  if (t === "above") return { role: "above", lo: num(c.strike!.value) ?? undefined };
+  if (t === "below") return { role: "below", hi: num(c.strike!.value) ?? undefined, hiStep: step(c.strike!.value) };
+  if (t === "above") return { role: "above", lo: num(c.strike!.value) ?? undefined, loStep: step(c.strike!.value) };
   if (c.strike) return null;
   const b = BELOW_RE.exec(c.label);
-  if (b) return { role: "below", hi: Number(b[1]) };
+  if (b) return { role: "below", hi: labelNum(b[1]), hiStep: step(b[1]) };
   const a = ABOVE_RE.exec(c.label);
-  if (a) return { role: "above", lo: Number(a[1]) };
+  if (a) return { role: "above", lo: labelNum(a[1]), loStep: step(a[1]) };
   const r = RANGE_RE.exec(c.label);
-  if (r) return { role: "range", lo: Number(r[1]), hi: Number(r[2]) };
+  if (r) return { role: "range", lo: labelNum(r[1]), hi: labelNum(r[2]), hiStep: step(r[2]), loStep: step(r[1]) };
   return null;
+}
+
+/** "X or above" contracts with no strike field (e.g. "8,000 or above"): their thresholds, or null. */
+function labelThresholds(cs: ContractLike[]): number[] | null {
+  if (cs.some((c) => c.strike)) return null;
+  const vals = cs.map((c) => ABOVE_RE.exec(c.label)).map((m) => (m ? labelNum(m[1]) : NaN));
+  return vals.every(Number.isFinite) ? vals : null;
+}
+
+/**
+ * Prices consistent with exactly one listed outcome winning: total bids ≤ 1 ≤ total asks (otherwise
+ * buying every outcome, or selling every outcome, would be free money). Asks totalling well under 1
+ * mean the market prices a real chance that none of the listed outcomes wins, which a payout
+ * schedule over these outcomes can't honour. Unquoted sides count at their bounds (bid 0, ask 1).
+ */
+export const MAX_UNLISTED = 0.05;
+function pricesCoverOneWinner(cs: ContractLike[]): boolean {
+  let bids = 0;
+  let asks = 0;
+  for (const c of cs) {
+    const i = toInstrument(c);
+    bids += i.bestBid ?? (i.noAsk !== null ? 1 - i.noAsk : 0);
+    asks += i.bestAsk ?? i.yesAsk ?? 1;
+  }
+  return bids <= 1 + MAX_UNLISTED && asks >= 1 - MAX_UNLISTED;
+}
+
+/** Gemini's own rules for every contract say the event is mutually exclusive (exactly one can resolve yes). */
+function rulesSayExclusive(cs: ContractLike[]): boolean {
+  return cs.every((c) => c.description !== undefined && JSON.stringify(c.description).toLowerCase().includes("mutually exclusive"));
 }
 
 /** Weather-style ladders: one "X or below", contiguous integer ranges "a to b", one "Y or above". */
@@ -93,15 +138,28 @@ function parseBucketLadder(contracts: ContractLike[]): ParsedBucket[] | null {
     if (r.role === "range" && r.hi! >= r.lo!) parsed.push({ c, lo: r.lo!, hi: r.hi! });
   });
   if (parsed.length !== contracts.length - 2 || parsed.length < 1) return null;
+  contracts.forEach((c, i) => {
+    const r = roles[i]!;
+    if (r.role === "range") Object.assign(parsed.find((p) => p.c === c)!, { hiStep: r.hiStep, loStep: r.loStep });
+  });
   parsed.sort((a, b) => (a.lo as number) - (b.lo as number));
-  const b = roles[contracts.indexOf(below[0])]!.hi;
-  const a = roles[contracts.indexOf(above[0])]!.lo;
+  const belowRole = roles[contracts.indexOf(below[0])]!;
+  const aboveRole = roles[contracts.indexOf(above[0])]!;
+  const b = belowRole.hi;
+  const a = aboveRole.lo;
   if (b === undefined || a === undefined) return null;
-  // Contiguity on an integer grid: below b, then b+1..., ..., then a and above.
-  if ((parsed[0].lo as number) !== b + 1) return null;
-  for (let i = 1; i < parsed.length; i++) if ((parsed[i].lo as number) !== (parsed[i - 1].hi as number) + 1) return null;
-  if (a !== (parsed[parsed.length - 1].hi as number) + 1) return null;
-  return [{ c: below[0], lo: null, hi: b }, ...parsed, { c: above[0], lo: a, hi: null }];
+  // No gaps and no overlaps: each range starts exactly one step after the previous one ends, the
+  // step being the finer precision of the two labels: 1 for "58 to 59" | "60 to 61"; 0.01 for
+  // "7,400 to 7,599.99" | "7,600 to …" and for "8,800 to 9,000" | "9,000.01 or above".
+  const stepOf = (x?: number, y?: number) => (x === undefined ? y : y === undefined ? x : Math.min(x, y));
+  const meets = (hi: number, st: number | undefined, lo: number) => st !== undefined && Math.abs(lo - (hi + st)) <= st * 1e-6;
+  const chain: ParsedBucket[] = [{ c: below[0], lo: null, hi: b, hiStep: belowRole.hiStep }, ...parsed, { c: above[0], lo: a, hi: null, loStep: aboveRole.loStep }];
+  for (let i = 1; i < chain.length; i++) {
+    const st = stepOf(chain[i - 1].hiStep, chain[i].loStep);
+    if (!meets(chain[i - 1].hi as number, st, chain[i].lo as number)) return null;
+    chain[i - 1].gap = st; // the cut goes halfway across this gap
+  }
+  return chain;
 }
 
 export function classify(e: EventLike, opts: NormalizeOptions = {}): Classification {
@@ -118,7 +176,18 @@ export function classify(e: EventLike, opts: NormalizeOptions = {}): Classificat
   }
   if (e.template === "sports-spread") return { ok: false, reason: "two-sided spread ladder" };
   if (e.template === "sports-player-props") return { ok: false, reason: "several underlyings in one event" };
+  const lt = labelThresholds(cs);
+  if (lt) {
+    if (new Set(lt).size !== lt.length) return { ok: false, reason: "duplicate strikes (more than one underlying)" };
+    return { ok: true, kind: "threshold" };
+  }
   if (parseBucketLadder(cs)) return { ok: true, kind: "buckets" };
+  // A race of named outcomes: accepted on Gemini's own word that it is mutually exclusive, and only
+  // while its prices agree that one of the listed outcomes will win.
+  if (cs.length >= 3 && rulesSayExclusive(cs)) {
+    if (!pricesCoverOneWinner(cs)) return { ok: false, reason: "the market prices a real chance that none of the listed outcomes wins" };
+    return { ok: true, kind: "categorical" };
+  }
   return { ok: false, reason: "outcomes not provably mutually exclusive" };
 }
 
@@ -224,8 +293,9 @@ export function normalizeEvent(e: EventLike, opts: NormalizeOptions = {}): Ladde
   let ladder: Ladder;
 
   if (cls.kind === "threshold") {
-    const sorted = [...e.contracts].sort((a, b) => Number(a.strike!.value) - Number(b.strike!.value));
-    const strikes = sorted.map((c) => Number(c.strike!.value));
+    const strikeOf = (c: ContractLike) => (c.strike ? Number(c.strike.value) : labelNum(ABOVE_RE.exec(c.label)![1]));
+    const sorted = [...e.contracts].sort((a, b) => strikeOf(a) - strikeOf(b));
+    const strikes = sorted.map(strikeOf);
     const instruments = sorted.map(toInstrument);
     const n = strikes.length;
     const { values: m, reliable } = thresholdSurvival(instruments, strikes);
@@ -257,8 +327,9 @@ export function normalizeEvent(e: EventLike, opts: NormalizeOptions = {}): Ladde
   } else if (cls.kind === "buckets") {
     const parsed = parseBucketLadder(e.contracts)!;
     const instruments = parsed.map((p) => toInstrument(p.c));
-    // Cut points between integer buckets sit at the half-step: below b | b+1..: cut at b + 0.5.
-    const cuts = parsed.slice(0, -1).map((p) => (p.hi as number) + 0.5);
+    // Cut points sit halfway across the step between one range's end and the next one's start:
+    // 59 | 60 → 59.5; 7,599.99 | 7,600 → 7,599.995; 9,000 | 9,000.01 → 9,000.005.
+    const cuts = parsed.slice(0, -1).map((p) => (p.hi as number) + (p.gap ?? 1) / 2);
     const centers = parsed.map((p) =>
       p.lo === null ? cuts[0] - 1 : p.hi === null ? cuts[cuts.length - 1] + 1 : ((p.lo as number) + (p.hi as number)) / 2,
     );
@@ -269,7 +340,18 @@ export function normalizeEvent(e: EventLike, opts: NormalizeOptions = {}): Ladde
       strikes: [],
       cuts,
       bucketLabels: parsed.map((p) => p.c.label),
-      cutLabels: cuts.map((c) => formatValue(c, unit)),
+      // Label each cut with the rounder of its two neighbouring bounds: "4,000" between "3,999.99"
+      // and "4,000"; "9,000" between "9,000" and "9,000.01". When both are written alike, the cut
+      // itself: "59.5°F" between 59 and 60.
+      cutLabels: cuts.map((c, i) => {
+        const cur = parsed[i];
+        const nxt = parsed[i + 1];
+        const hs = cur.hiStep ?? 1;
+        const ls = nxt.loStep ?? 1;
+        if (ls > hs + 1e-12) return formatValue(nxt.lo as number, unit, true);
+        if (hs > ls + 1e-12) return formatValue(cur.hi as number, unit, true);
+        return formatValue(c, unit, true);
+      }),
       instruments,
       marketProb: normalizeVec(values.map((v) => Math.max(0, v)), PROB_FLOOR),
       quoted: instruments.map((i) => i.yesAsk !== null && i.noAsk !== null),

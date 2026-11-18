@@ -26,6 +26,39 @@ const SNAPSHOT_EVERY_MS = 10 * 60_000;
  */
 export const CLOSE_BUFFER_MS = 10 * 60_000;
 
+/** Used when Gemini's category list can't be read. */
+const FALLBACK_CATEGORIES = ["Politics", "Economics", "Tech", "Business", "Crypto", "Sports", "Culture", "Commodities", "Midterms", "Weather", "Finance", "Economy"];
+/** "Live" re-lists in-play events that already belong to a real category, so it's skipped. */
+const SKIP_CATEGORIES = new Set(["Live"]);
+
+/**
+ * One front-page section per Gemini category: how much it trades, what Contour can trade as one
+ * curve, and its most popular markets that can't be, with the reason in plain words.
+ */
+export interface CategorySection {
+  category: string;
+  events: number;
+  /** Traded in the last 24 hours across the section's markets: what "busiest" means on the front page. */
+  volume24h: number;
+  /** Traded since each market listed. */
+  volume: number;
+  tradable: number;
+  popular: { ticker: string; title: string; volume24h: number; volume: number; reason: string }[];
+}
+
+/** Why a market can't be one curve, for a reader rather than a log. */
+export function plainReason(reason: string): string {
+  if (/fewer than \d+ outcomes/.test(reason)) return "A single yes/no question";
+  if (/not provably mutually exclusive/.test(reason)) return "More than one outcome can come true";
+  if (/none of the listed outcomes/.test(reason)) return "The winner may not be on the list";
+  if (/spread/.test(reason)) return "A point spread";
+  if (/several underlyings/.test(reason)) return "Player props: several stats in one market";
+  if (/quoted|tight two-sided/.test(reason)) return "Too thinly quoted right now";
+  if (/exceeds the/.test(reason)) return "Too many outcomes for one position";
+  if (/duplicate strikes/.test(reason)) return "More than one underlying";
+  return "Its outcomes don't form one set";
+}
+
 export interface MarketSummary {
   ticker: string;
   title: string;
@@ -37,6 +70,8 @@ export interface MarketSummary {
   bucketCount: number;
   quotedCount: number;
   volume: number | null;
+  /** Traded in the last 24 hours. */
+  volume24h: number | null;
   marketProb: number[];
   cutLabels: string[];
   bucketLabels: string[];
@@ -73,7 +108,7 @@ const allowlist = () => [...config.categoricalAllowlist, ...loadSamples().map((e
 
 export class MarketService {
   /** frozenAt: when the data was captured, if it came from the saved snapshot instead of live Gemini. */
-  private list: { at: number; markets: MarketSummary[]; rejected: number; frozenAt: number | null } | null = null;
+  private list: { at: number; markets: MarketSummary[]; rejected: number; frozenAt: number | null; sections: CategorySection[] } | null = null;
   private listPromise: Promise<void> | null = null;
   private events = new Map<string, { at: number; event: RawEvent; frozen?: boolean; promise?: Promise<RawEvent> }>();
   private books = new Map<string, { at: number; yes?: number; no?: number; yesAsk: number | null; noAsk: number | null }>();
@@ -81,12 +116,30 @@ export class MarketService {
 
   constructor(public client: GeminiPublicClient) {}
 
+  /** The categories to list: every category Gemini has ("*"), or the configured ones. */
+  private async categories(): Promise<string[]> {
+    if (!config.marketCategories.includes("*")) return config.marketCategories;
+    try {
+      const { categories } = await this.client.getCategories();
+      return categories.filter((c) => !SKIP_CATEGORIES.has(c));
+    } catch (err) {
+      console.warn("[markets] category list:", (err as Error).message);
+      return FALLBACK_CATEGORIES;
+    }
+  }
+
   private async refreshList() {
     const all: RawEvent[] = [];
+    const seen = new Set<string>();
     let failures = 0;
-    for (const category of config.marketCategories) {
+    for (const category of await this.categories()) {
       try {
-        all.push(...(await this.client.listAllEvents({ status: "active", category }, 100, 5)));
+        // An event can be listed under more than one category; keep the first copy.
+        for (const e of await this.client.listAllEvents({ status: "active", category }, 100, 5)) {
+          if (seen.has(e.ticker)) continue;
+          seen.add(e.ticker);
+          all.push(e);
+        }
       } catch (err) {
         failures++;
         console.warn(`[markets] ${category}:`, (err as Error).message);
@@ -106,12 +159,28 @@ export class MarketService {
     const markets: MarketSummary[] = [];
     const tradable: RawEvent[] = [];
     let rejected = 0;
+    const stats = new Map<string, CategorySection>();
+    const section = (cat: string) => {
+      let s = stats.get(cat);
+      if (!s) stats.set(cat, (s = { category: cat, events: 0, volume24h: 0, volume: 0, tradable: 0, popular: [] }));
+      return s;
+    };
     const sampleTickers = new Set(loadSamples().map((e) => e.ticker));
     for (const e of [...source, ...loadSamples()]) {
       const sample = sampleTickers.has(e.ticker);
       // Frozen markets may have expired since; keep them so the demo can still be explored.
       if (frozenAt === null && !sample && new Date(e.expiryDate).getTime() < Date.now() + CLOSE_BUFFER_MS) continue;
       const r = tryNormalize(e, { categoricalAllowlist: allowlist() });
+      const vol = Number(e.volume ?? 0) || 0;
+      const vol24 = Number(e.volume24h ?? 0) || 0;
+      if (!sample) {
+        const st = section(e.category);
+        st.events++;
+        st.volume += vol;
+        st.volume24h += vol24;
+        if ("ladder" in r) st.tradable++;
+        else if (vol > 0) st.popular.push({ ticker: e.ticker, title: e.title, volume24h: vol24, volume: vol, reason: plainReason(r.reason) });
+      }
       if (!("ladder" in r)) {
         rejected++;
         continue;
@@ -172,13 +241,21 @@ export class MarketService {
         bucketCount: l.marketProb.length,
         quotedCount: l.quoted.filter(Boolean).length,
         volume: e.volume ? Number(e.volume) : null,
+        volume24h: e.volume24h !== undefined && e.volume24h !== null ? Number(e.volume24h) || 0 : null,
         marketProb: l.marketProb,
         cutLabels: l.cutLabels,
         ...(sample ? { sample: true } : {}),
       });
     }
     markets.sort((a, b) => a.category.localeCompare(b.category) || a.expiry.localeCompare(b.expiry) || a.title.localeCompare(b.title));
-    this.list = { at: Date.now(), markets, rejected, frozenAt };
+    // Sections by how much each traded in the last 24 hours (lifetime volume breaks ties); each keeps
+    // its few most active untradable markets.
+    const busier = (a: { volume24h: number; volume: number }, b: { volume24h: number; volume: number }) => b.volume24h - a.volume24h || b.volume - a.volume;
+    const sections = [...stats.values()]
+      .filter((s) => s.events > 0)
+      .map((s) => ({ ...s, volume: Math.round(s.volume), volume24h: Math.round(s.volume24h), popular: s.popular.sort(busier).slice(0, 4) }))
+      .sort(busier);
+    this.list = { at: Date.now(), markets, rejected, frozenAt, sections };
     // Live and healthy: refresh the desk's own frozen copy every few minutes.
     if (frozenAt === null && tradable.length && Date.now() - this.lastSnapshotAt > SNAPSHOT_EVERY_MS) {
       try {
@@ -190,14 +267,14 @@ export class MarketService {
     }
   }
 
-  /** Stale-while-revalidate list of tradable ladders (refreshes every 60 s). */
-  async listMarkets(): Promise<{ markets: MarketSummary[]; rejected: number; updatedAt: number; frozenAt: number | null }> {
-    const stale = !this.list || Date.now() - this.list.at > 60_000;
+  /** Stale-while-revalidate list of tradable ladders (refreshes every 2 min: it reads every category). */
+  async listMarkets(): Promise<{ markets: MarketSummary[]; rejected: number; updatedAt: number; frozenAt: number | null; sections: CategorySection[] }> {
+    const stale = !this.list || Date.now() - this.list.at > 120_000;
     if (stale && !this.listPromise) {
       this.listPromise = this.refreshList().finally(() => (this.listPromise = null));
     }
     if (!this.list) await this.listPromise;
-    return { markets: this.list!.markets, rejected: this.list!.rejected, updatedAt: this.list!.at, frozenAt: this.list!.frozenAt };
+    return { markets: this.list!.markets, rejected: this.list!.rejected, updatedAt: this.list!.at, frozenAt: this.list!.frozenAt, sections: this.list!.sections };
   }
 
   /** A market's event from the frozen copy, for when Gemini can't serve it live. */
