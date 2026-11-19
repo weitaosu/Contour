@@ -1,7 +1,7 @@
 "use client";
 
 import { memo, type ReactNode } from "react";
-import type { Ladder, Quote } from "@contour/core";
+import { paysIn, type Ladder, type Quote } from "@contour/core";
 import { GAIN, ProfitChart } from "@/components/charts/ProfitChart";
 import { OutcomeBars } from "@/components/charts/OutcomeBars";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
@@ -39,6 +39,7 @@ export const ProfitSummary = memo(function ProfitSummary({
   now = null,
   status = null,
   live = false,
+  regular = false,
 }: {
   ladder: Ladder;
   quote: Omit<Quote, "raw">;
@@ -55,8 +56,16 @@ export const ProfitSummary = memo(function ProfitSummary({
   status?: SummaryStatus | null;
   /** The view is being dragged (see ProfitChart). */
   live?: boolean;
+  /** Also draw the regular payout: the whole stake on the single best contract (as in "vs betting on one contract"). */
+  regular?: boolean;
 }) {
   const payouts = quote.payoutByBucket;
+  const cmp = regular ? quote.comparison : null;
+  const cmpIndex = cmp ? ladder.instruments.findIndex((i) => i.symbol === cmp.symbol) : -1;
+  const regularPl =
+    cmp && cmpIndex >= 0
+      ? payouts.map((_, j) => (paysIn(ladder, cmpIndex, cmp.side, j) ? cmp.qty : 0) - (cmp.qty * cmp.price + cmp.fee))
+      : null;
   const pl = payouts.map((p) => p - stake);
   const wins = payouts.map((p) => isWin(p, stake));
   const zones = runs(wins, (w) => w);
@@ -123,6 +132,11 @@ export const ProfitSummary = memo(function ProfitSummary({
               <AnimatedNumber value={focusPl} format={signedUsd} />
             </span>
             <span className="text-[13px] text-slate">{usd(payouts[focus])} back</span>
+            {regularPl && (
+              <span className="text-[13px] text-slate">
+                · one contract <span className="font-bold text-inkstone">{signedUsd(regularPl[focus])}</span>
+              </span>
+            )}
           </p>
         </div>
         {ladder.cuts ? (
@@ -142,6 +156,7 @@ export const ProfitSummary = memo(function ProfitSummary({
                 cuts={ladder.cuts}
                 now={now}
                 height={h}
+                compare={regularPl && cmp ? [{ pl: regularPl, label: `All ${usd(stake, 0)} on ${cmp.side.toUpperCase()} ${cmp.label}` }] : []}
               />
             )}
           </Fill>
@@ -167,6 +182,11 @@ export const ProfitSummary = memo(function ProfitSummary({
           {ladder.cuts && (
             <span className="inline-flex items-center gap-1.5">
               <span className="h-3 w-0 border-l-[1.5px] border-dashed border-slate" /> Break-even
+            </span>
+          )}
+          {regularPl && cmp && (
+            <span className="inline-flex items-center gap-1.5">
+              <span className="h-0 w-4 border-t-2 border-inkstone" /> Regular payout: all {usd(stake, 0)} on {cmp.side.toUpperCase()} {cmp.label}
             </span>
           )}
         </div>

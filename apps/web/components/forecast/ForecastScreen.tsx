@@ -4,6 +4,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, Vi
 import { useQuery } from "@tanstack/react-query";
 import {
   compile,
+  noFloor,
   formatValue,
   fromBars,
   isTradable,
@@ -33,6 +34,8 @@ import { ProtectCard, ProtectControls, ProtectNotes } from "./ProtectCard";
 import { MORE_STRATEGIES, MORE_STRATEGIES_ENABLED, type StrategyKey } from "./strategies";
 import { CompareMini } from "./ComparisonCard";
 import { LegsTable } from "./LegsPanel";
+import { OutcomesPanel } from "./OutcomesPanel";
+import { PillChoice } from "@/components/zone/controls";
 import { Fill, Panel, StepBadge } from "./Panel";
 import { CandidateEditor } from "./CandidateEditor";
 import { OUTLOOKS, OutlookPicker, SPLIT_OFFSET, type Outlook } from "./OutlookPicker";
@@ -62,7 +65,7 @@ const confidenceName = (c: number) => {
 
 export interface Preset { c?: number; w?: number; x?: number; s?: number }
 
-export function ForecastScreen({ ticker, preset = {} }: { ticker: string; preset?: Preset }) {
+export function ForecastScreen({ ticker, preset = {}, regular = false }: { ticker: string; preset?: Preset; regular?: boolean }) {
   // Slow tier: the full ladder (market odds) only refreshes every CHART_MS; live prices come from useLive.
   const ladderQ = useQuery({ queryKey: ["ladder", ticker], queryFn: () => desk.ladder(ticker), refetchInterval: CHART_MS });
   if (ladderQ.isError)
@@ -96,13 +99,14 @@ export function ForecastScreen({ ticker, preset = {} }: { ticker: string; preset
     <Screen
       ladder={d.ladder}
       preset={preset}
+      regular={regular}
       offline={!!d.sample || !!d.frozen}
       banner={d.sample ? <SampleBanner compact /> : d.frozen ? <FrozenBanner at={d.capturedAt} className="!py-3" /> : null}
     />
   );
 }
 
-function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: Preset; offline: boolean; banner?: React.ReactNode }) {
+function Screen({ ladder, preset, offline, banner, regular = false }: { ladder: Ladder; preset: Preset; offline: boolean; banner?: React.ReactNode; regular?: boolean }) {
   const ordered = ladder.cuts !== null;
   // Fast tier: spot price and current asks every few seconds (nothing to stream for samples or frozen data).
   const liveQ = useLive(ladder.eventTicker, !offline);
@@ -370,17 +374,27 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
   // picture, so the expensive parts of the screen only change when the position really changes.
   const steady = useRef<{ key: string; q: ShownQuote; server: boolean; at: number | null } | null>(null);
   const prevSteady = steady.current;
-  const display: ShownQuote = (() => {
+  const displayBase: ShownQuote = (() => {
     if (!prevSteady || prevSteady.key !== sticky || !prevSteady.server || !serverFresh || prevSteady.q === shown) return shown;
     const tol = Math.max(0.25, stake * 0.005);
     const a = prevSteady.q.payoutByBucket;
     const b = shown.payoutByBucket;
     return a.length === b.length && a.every((p, j) => Math.abs(p - b[j]) < tol) ? prevSteady.q : shown;
   })();
-  const displayAt = display === prevSteady?.q && display !== shown ? prevSteady.at : serverFresh?.at ?? null;
+  const displayAt = displayBase === prevSteady?.q && displayBase !== shown ? prevSteady.at : serverFresh?.at ?? null;
   useEffect(() => {
-    steady.current = { key: sticky, q: display, server: !!serverFresh, at: displayAt };
+    steady.current = { key: sticky, q: displayBase, server: !!serverFresh, at: displayAt };
   });
+  // Test page only: the extra comparison panels (regular payout line, 100 outcomes).
+  const blendable = regular && !protecting && !spreading && !!displayBase.comparison && displayBase.legs.length > 0;
+  // Test page: "protect against losing everything" off = no floor; outcomes outside your likely range can pay $0.
+  const [floorOn, setFloorOn] = useState(true);
+  const [rangeMass, setRangeMass] = useState(0.9);
+  const unprotected = useMemo(
+    () => (blendable && !floorOn ? noFloor({ ladder, belief: solveBelief, confidence, stakeUsd: Math.max(1, stake), range: rangeMass }) : null),
+    [blendable, floorOn, ladder, solveBelief, confidence, stake, rangeMass],
+  );
+  const display: ShownQuote = unprotected ?? displayBase;
   // Fast tier: the same contracts at the live asks, like a brokerage ticket's estimated cost.
   const fill = useMemo(() => liveFill(shown, live), [shown, live]);
   // Prices moved a lot since the last solve (or a contract lost its quote): re-solve now, at most every 8 s.
@@ -908,8 +922,59 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                   now={nowMark}
                   status={summaryStatus}
                   live={dragging}
+                  regular={regular}
                 />
               )}
+              {blendable && (
+                <div className="mt-2 flex flex-col gap-2 border-t border-mist pt-2.5">
+                  <div className="flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[13.5px] font-bold text-inkstone">Protect against losing everything</span>
+                    <div className="w-[180px]">
+                      <PillChoice
+                        label="Protect against losing everything"
+                        options={[
+                          { value: "on", label: "On" },
+                          { value: "off", label: "Off" },
+                        ]}
+                        value={floorOn ? "on" : "off"}
+                        onChange={(v) => setFloorOn(v === "on")}
+                      />
+                    </div>
+                  </div>
+                  {floorOn ? (
+                    <p className="text-[12.5px] leading-snug text-slate">On: every outcome pays something back. Turn it off to win more often, at the risk of losing it all if it ends outside your likely range.</p>
+                  ) : (
+                    <>
+                      <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="text-[13px] text-slate">Your likely range</span>
+                        <div className="w-[220px]">
+                          <PillChoice
+                            small
+                            label="Your likely range"
+                            options={[
+                              { value: 0.8, label: "80%" },
+                              { value: 0.9, label: "90%" },
+                              { value: 0.95, label: "95%" },
+                            ]}
+                            value={rangeMass}
+                            onChange={setRangeMass}
+                          />
+                        </div>
+                      </div>
+                      {unprotected && (
+                        <p className="text-[12.5px] leading-snug text-slate">
+                          You lose everything if it ends outside{" "}
+                          <b className="text-inkstone">
+                            {ladder.bucketLabels[unprotected.range.from].toLowerCase()} to {ladder.bucketLabels[unprotected.range.to].toLowerCase()}
+                          </b>{" "}
+                          (the middle {Math.round(rangeMass * 100)}% of your view). Narrower: more wins inside it, more ways to lose it all. Review still signs the protected position.
+                        </p>
+                      )}
+                    </>
+                  )}
+                </div>
+              )}
+
             </Panel>
             {showView && (
               <span
@@ -925,6 +990,12 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
             <section aria-label="Key numbers" className="min-w-0 rounded-[24px] bg-cloud p-2 max-lg:order-4">
               <KeyNumbers ladder={ladder} quote={display} stake={stake} belief={spreading ? null : solveBelief} faded={!!summaryStatus} />
             </section>
+          )}
+
+          {blendable && !summaryStatus && (
+            <div className="max-lg:order-4">
+              <OutcomesPanel ladder={ladder} quote={display} stake={stake} belief={solveBelief} />
+            </div>
           )}
 
           <div

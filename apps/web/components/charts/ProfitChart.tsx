@@ -38,6 +38,10 @@ export interface ProfitChartProps {
   likelyBracket?: boolean;
   /** The view is being dragged: bars glide together (no wave) so they keep up with the pointer. */
   live?: boolean;
+  /** Other positions to compare against, drawn as step lines over the bars (profit per outcome, same units). */
+  compare?: { pl: number[]; label: string; dashed?: boolean }[];
+  /** Word before the marker's label (default "Now"). */
+  nowPrefix?: string;
 }
 
 /**
@@ -123,6 +127,8 @@ export function ProfitChart({
   now = null,
   likelyBracket = true,
   live = false,
+  compare = [],
+  nowPrefix = "Now",
 }: ProfitChartProps) {
   const { ref, width: measured } = useSize<HTMLDivElement>();
   const width = measured || 600;
@@ -131,14 +137,24 @@ export function ProfitChart({
   const ordered = cutLabels.length === n - 1;
 
   // Where to look and how tall: the focus window, and a y-range fitted to the outcomes inside it.
-  const [wa, wb] = useMemo(() => focusWindow(target, ordered, likely), [target, ordered, likely]);
+  // The window also takes in where any comparison line steps, so both shapes are in view.
+  const [wa, wb] = useMemo(() => {
+    let [a, b] = focusWindow(target, ordered, likely);
+    for (const c of compare) {
+      const [ca, cb] = focusWindow(c.pl, ordered, likely);
+      a = Math.min(a, ca);
+      b = Math.max(b, cb);
+    }
+    return [a, b];
+  }, [target, ordered, likely, compare]);
   const inWindow = target.slice(wa, wb + 1);
+  const compareInWindow = compare.flatMap((c) => c.pl.slice(wa, wb + 1));
   // One outcome paying far more than the rest (a cheap tail contract) would flatten every other bar.
   // Then the scale fits the others, and that bar is drawn cut, with its true value written by it.
   const gainsDesc = inWindow.filter((v) => v > 0).sort((a, b) => b - a);
   const capAt = gainsDesc.length >= 3 && gainsDesc[1] > stake * 0.02 && gainsDesc[0] > 3 * gainsDesc[1] ? gainsDesc[1] * 1.6 : null;
-  const hiT = niceMax(Math.max(stake * 0.08, ...(capAt !== null ? [capAt] : inWindow)) * 1.04);
-  const loT = -niceMax(Math.max(stake * 0.08, ...inWindow.map((v) => -v)) * 1.04);
+  const hiT = niceMax(Math.max(stake * 0.08, ...(capAt !== null ? [capAt] : inWindow), ...compareInWindow) * 1.04);
+  const loT = -niceMax(Math.max(stake * 0.08, ...inWindow.map((v) => -v), ...compareInWindow.map((v) => -v)) * 1.04);
 
   // One timeline for everything that moves: bar heights, y-range and the zoom window glide together.
   // The bars move as a wave, left to right across the window: on first sight they grow out of the
@@ -214,7 +230,7 @@ export function ProfitChart({
   // The "now" marker: x from the gliding position; if the price is outside the window, a pill at that edge.
   const nowX = showNow ? left + (nowU - w0) * step : 0;
   const nowSide: "in" | "left" | "right" = nowX < left ? "left" : nowX > right ? "right" : "in";
-  const nowText = showNow ? (nowSide === "left" ? `← Now ${now!.label}` : nowSide === "right" ? `Now ${now!.label} →` : `Now ${now!.label}`) : "";
+  const nowText = showNow ? (nowSide === "left" ? `← ${nowPrefix} ${now!.label}` : nowSide === "right" ? `${nowPrefix} ${now!.label} →` : `${nowPrefix} ${now!.label}`) : "";
   const pillW = textWidth(nowText, 12.5) + 18;
   const pillX = Math.min(right - pillW, Math.max(left, (nowSide === "in" ? nowX : nowSide === "left" ? left : right) - pillW / 2));
 
@@ -320,6 +336,24 @@ export function ProfitChart({
                 </g>
               );
             })}
+
+            {/* comparison positions: step lines across each outcome's slot */}
+            {compare.map((c, k) => (
+              <path
+                key={`cmp${k}`}
+                d={c.pl.map((v, j) => `${j === 0 ? "M" : "L"}${slotX(j)},${y(v)} L${slotX(j + 1)},${y(v)}`).join(" ")}
+                fill="none"
+                stroke={COLORS.ink}
+                strokeOpacity={c.dashed ? 0.45 : 0.85}
+                strokeWidth={2}
+                strokeDasharray={c.dashed ? "6 4" : undefined}
+                strokeLinejoin="round"
+                pointerEvents="none"
+                className="fade-in"
+              >
+                <title>{c.label}</title>
+              </path>
+            ))}
 
             {/* settled outcome */}
             {outcome !== null && outcome >= 0 && outcome < n && (

@@ -18,7 +18,7 @@ const roundTo = (x: number, step: number) => Math.round(x / step) * step;
 const floorTo = (x: number, step: number) => Math.floor(x / step + 1e-9) * step;
 
 /** One leg to buy: instrument index, side and contract quantity. */
-interface LegSpec {
+export interface LegSpec {
   i: number;
   side: "yes" | "no";
   qty: number;
@@ -29,7 +29,7 @@ interface LegSpec {
  * and the payout per outcome. `stakeBase` null means "the stake is what the legs cost" (rounded up
  * to the cent); otherwise the legs must fit inside it and the remainder is cash.
  */
-function assemble(ladder: Ladder, specs: LegSpec[], stakeBase: number | null, feeRate: number): Quote {
+export function assemble(ladder: Ladder, specs: LegSpec[], stakeBase: number | null, feeRate: number): Quote {
   const nB = ladder.marketProb.length;
   const legs: Leg[] = [];
   const payoutBase = new Array<number>(nB).fill(0);
