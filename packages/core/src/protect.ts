@@ -1,6 +1,6 @@
 import { bucketMidpoints, marketMoments } from "./beliefs";
 import { costPerContract, GEMINI_TAKER_FEE_RATE, tradingFeeUsd } from "./fees";
-import { isTradable, paysIn } from "./normalize";
+import { isReversed, isTradable, paysIn } from "./normalize";
 import type { Ladder, Leg, Quote } from "./types";
 
 /**
@@ -128,7 +128,7 @@ export function protect(input: ProtectInput): Quote & { protection: ProtectionIn
   // Lower than the solver's $1: these need one leg per strike to keep their staircase shape, and
   // Gemini's own minimum is 0.01 contracts. The cost is a cent of rounded-up fee per extra order.
   const minLegUsd = input.minLegUsd ?? 0.1;
-  if (ladder.kind !== "threshold" || !ladder.cuts) throw new Error("protection needs a price ladder");
+  if (ladder.kind !== "threshold" || !ladder.cuts || isReversed(ladder)) throw new Error("protection needs a price ladder");
   if (!(units > 0)) throw new Error("units must be positive");
   const cuts = ladder.cuts;
   const mids = bucketMidpoints(ladder);
@@ -228,7 +228,7 @@ export interface SpreadInfo {
 export function spread(input: SpreadInput): Quote & { spread: SpreadInfo } {
   const { ladder, direction, stakeUsd } = input;
   const feeRate = input.feeRate ?? GEMINI_TAKER_FEE_RATE;
-  if (ladder.kind !== "threshold" || !ladder.cuts) throw new Error("spreads need a price ladder");
+  if (ladder.kind !== "threshold" || !ladder.cuts || isReversed(ladder)) throw new Error("spreads need a price ladder");
   if (!(stakeUsd > 0)) throw new Error("stake must be positive");
   const from = Math.min(input.from, input.to);
   const to = Math.max(input.from, input.to);
@@ -256,7 +256,7 @@ export function spread(input: SpreadInput): Quote & { spread: SpreadInfo } {
 
 /** Strikes that make sensible floors: tradable NO, at or below the market's expected price. */
 export function floorChoices(ladder: Ladder, max = 6): number[] {
-  if (ladder.kind !== "threshold" || !ladder.cuts) return [];
+  if (ladder.kind !== "threshold" || !ladder.cuts || isReversed(ladder)) return [];
   const center = marketMoments(ladder).mean;
   return ladder.strikes
     .map((s, i) => ({ s, i }))
@@ -267,7 +267,7 @@ export function floorChoices(ladder: Ladder, max = 6): number[] {
 
 /** Strikes that make sensible caps: tradable NO, above the expected price, below the top strike. */
 export function capChoices(ladder: Ladder, max = 6): number[] {
-  if (ladder.kind !== "threshold" || !ladder.cuts) return [];
+  if (ladder.kind !== "threshold" || !ladder.cuts || isReversed(ladder)) return [];
   const center = marketMoments(ladder).mean;
   const n = ladder.strikes.length;
   return ladder.strikes

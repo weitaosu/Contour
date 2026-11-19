@@ -296,14 +296,18 @@ export async function runScheduler(ctx: HandlerCtx, graceSecs: number) {
         }
         continue;
       }
-      const ladder = normalizeEvent(ev, { allowUnquoted: true, categoricalAllowlist: config.categoricalAllowlist });
+      const q = ctx.db.prepare("SELECT preimage_json, quote_json FROM quotes WHERE id = ?").get(p.quote_id) as { preimage_json: string; quote_json: string };
+      const pre = JSON.parse(q.preimage_json) as { belief: number[]; marketProb: number[] };
+      // Rebuild the exact ladder the schedule was quoted over (its contracts and its "none of the
+      // listed" outcome); quotes from before that was recorded fall back to reading the event.
+      const shape = (JSON.parse(q.quote_json) as { ladderShape?: { symbols: string[]; none: string | null } }).ladderShape;
+      const ladder = normalizeEvent(ev, { allowUnquoted: true, categoricalAllowlist: config.categoricalAllowlist, ...(shape ? { only: shape } : {}) });
       const o = outcomeBucket(ladder, ev);
-      if (!o || !o.consistent || o.bucket < 0) {
-        ctx.log.warn(`[scheduler] ${p.pubkey}: settlement inconsistent (${o?.detail}); leaving for unwind`);
+      if (!o || !o.consistent || o.bucket < 0 || ladder.marketProb.length !== pre.marketProb.length) {
+        const why = ladder.marketProb.length !== pre.marketProb.length ? `ladder has ${ladder.marketProb.length} outcomes, the quote ${pre.marketProb.length}` : o?.detail;
+        ctx.log.warn(`[scheduler] ${p.pubkey}: settlement inconsistent (${why}); leaving for unwind`);
         continue;
       }
-      const q = ctx.db.prepare("SELECT preimage_json FROM quotes WHERE id = ?").get(p.quote_id) as { preimage_json: string };
-      const pre = JSON.parse(q.preimage_json) as { belief: number[]; marketProb: number[] };
       const score = scoreBps(pre.belief, pre.marketProb, o.bucket);
       const sig = await ctx.chain.settle(new PublicKey(p.pubkey), new PublicKey(p.owner), o.bucket, score);
       ctx.log.info(`[scheduler] settled ${p.pubkey} bucket=${o.bucket} score=${score}: ${sig}`);

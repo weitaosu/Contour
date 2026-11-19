@@ -9,6 +9,7 @@ import {
   protect,
   spread,
   tryNormalize,
+  isReversed,
   instrumentFromContract,
   anyViewTrades,
   type DepthMap,
@@ -156,7 +157,9 @@ export class MarketService {
     for (const category of await this.categories()) {
       try {
         // An event can be listed under more than one category; keep the first copy.
-        for (const e of await this.client.listAllEvents({ status: "active", category }, 100, 5)) {
+        // Up to 1,500 per category: Sports alone lists over 1,100 active events (every game, now that
+        // game results trade), and stopping at 500 left most of them out.
+        for (const e of await this.client.listAllEvents({ status: "active", category }, 100, 15)) {
           if (seen.has(e.ticker)) continue;
           seen.add(e.ticker);
           all.push(e);
@@ -481,6 +484,13 @@ export interface StoredQuote {
   marketProb: number[];
   bucketLabels: string[];
   crossedStrikes: string[];
+  /**
+   * The ladder the schedule is over: its contracts in order and its "none of the listed" outcome.
+   * Settlement rebuilds the ladder from these, since by then every contract has settled and the
+   * live rules (which contracts still trade, what the asks leave over) can't be applied again.
+   * Absent on quotes made before it was recorded; those settle from the event as before.
+   */
+  ladderShape?: { symbols: string[]; none: string | null };
 }
 
 /** Compile, size against the book, persist and hash a quote. */
@@ -503,7 +513,9 @@ export async function makeQuote(markets: MarketService, db: DB, req: QuoteReques
   }
   let quote: Quote;
   const direct = !!(req.protect || req.spread); // built straight from contracts: no view, no solver
-  if (direct && ladder.kind !== "threshold") throw Object.assign(new Error("This strategy is only available on price ladders."), { statusCode: 400 });
+  // Protection, collars, covered calls and spreads need an "at or above" price ladder.
+  if (direct && (ladder.kind !== "threshold" || isReversed(ladder)))
+    throw Object.assign(new Error("This strategy is only available on price ladders."), { statusCode: 400 });
   if (req.protect) {
     // Floor / collar / covered call, priced directly from NO asks.
     quote = protect({ ladder, units: req.protect.units, floor: req.protect.floor ?? null, cap: req.protect.cap });
@@ -560,6 +572,7 @@ export async function makeQuote(markets: MarketService, db: DB, req: QuoteReques
     marketProb: ladder.marketProb,
     bucketLabels: ladder.bucketLabels,
     crossedStrikes: ladder.instruments.filter((_, i) => ladder.crossed[i]).map((i) => i.label),
+    ladderShape: { symbols: ladder.instruments.map((i) => i.symbol), none: ladder.none ?? null },
   };
   db.prepare(
     `INSERT INTO quotes (id, ticker, forecast_hash, preimage_json, quote_json, schedule_json, stake_base, expiry_ts, created_at)

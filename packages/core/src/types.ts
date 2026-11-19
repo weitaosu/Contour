@@ -11,6 +11,12 @@ export interface Instrument {
   minQty: number;
   qtyStep: number;
   priceStep: number;
+  /**
+   * Threshold ladders only: this contract's YES pays at or below its strike ("Before Jun 1, 2027",
+   * "6,300 or below") instead of at or above it. Prices stay exactly as Gemini quotes them; only
+   * paysIn and the market curve read the contract the other way (see aboveView).
+   */
+  below?: boolean;
 }
 
 export interface Ladder {
@@ -33,7 +39,18 @@ export interface Ladder {
   quoted: boolean[]; // per instrument: both sides have asks
   crossed: boolean[]; // per instrument: yesAsk + noAsk < 1 (stale / transient quote)
   interpolated: boolean[]; // per instrument: mid was interpolated for the curve
-  unit: { prefix: string; suffix: string };
+  /**
+   * date: strikes and cuts are UTC timestamps (ms) and format as dates ("Before …" ladders), to the
+   * precision the contracts are written in: whole years, months, or days.
+   */
+  unit: { prefix: string; suffix: string; date?: "year" | "month" | "day" };
+  /**
+   * Categorical only: the label of an extra last outcome, "none of the listed ones" (an unlisted
+   * candidate, a game with no result, the No side of a single yes/no question). No listed contract
+   * resolves YES in it, so it is paid when every contract resolves NO. Absent when the listed
+   * outcomes cover every result.
+   */
+  none?: string;
 }
 
 export interface Leg {

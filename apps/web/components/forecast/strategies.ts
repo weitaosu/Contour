@@ -1,5 +1,5 @@
 import { BetweenHorizontalStart, Coins, ShieldHalf, TrendingUpDown, type LucideIcon } from "lucide-react";
-import { capChoices, type Ladder } from "@contour/core";
+import { capChoices, isReversed, type Ladder } from "@contour/core";
 
 /**
  * Strategies beyond the four everyday outlooks and "Protect what you hold". They live in the
@@ -27,7 +27,8 @@ export interface StrategyDef {
   available: (ladder: Ladder) => boolean;
 }
 
-const priceLadder = (l: Ladder) => l.kind === "threshold" && l.cuts !== null;
+// Spreads, collars and covered calls are built on "at or above" strikes, so not on "Before …" ladders.
+const priceLadder = (l: Ladder) => l.kind === "threshold" && l.cuts !== null && !isReversed(l);
 
 export const MORE_STRATEGIES: StrategyDef[] = [
   {

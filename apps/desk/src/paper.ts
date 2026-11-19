@@ -50,6 +50,10 @@ export interface LadderInfo {
   unit: Ladder["unit"];
   /** Contract symbols in ladder order, to work out which outcome won at settlement. */
   symbols: string[];
+  /** Per contract: its YES pays at or below the strike ("Before …"). Absent on positions opened before these ladders. */
+  below?: boolean[];
+  /** The extra "none of the listed" outcome, last in bucketLabels, won when every contract resolves NO. */
+  none?: string;
   /** The market's odds when the position was opened. */
   marketProb: number[];
 }
@@ -256,6 +260,8 @@ async function fillQuote(markets: PaperMarkets, q: StoredQuote) {
     cuts: ladder.cuts,
     unit: ladder.unit,
     symbols: ladder.instruments.map((i) => i.symbol),
+    ...(ladder.instruments.some((i) => i.below) ? { below: ladder.instruments.map((i) => i.below === true) } : {}),
+    ...(ladder.none ? { none: ladder.none } : {}),
     marketProb: ladder.marketProb,
   };
   return { fills, cashBase, payBase, ladder: info, category: ladder.category, title: ladder.title, expiry: ladder.expiry };
@@ -428,14 +434,19 @@ export async function sellPosition(db: DB, markets: PaperMarkets, account: strin
 /** Gemini has published the result: every contract we can see has resolved. */
 const resolved = (e: RawEvent) => e.status === "settled" || (e.contracts.length > 0 && e.contracts.every((c) => c.resolutionSide === "yes" || c.resolutionSide === "no"));
 
-/** The winning outcome: for a price ladder, how many "X or above" contracts resolved YES; else the one that did. */
+/**
+ * The winning outcome: for a price ladder, how many strikes came true on the "at or above" side (a
+ * "Before …" contract does when it resolves NO); else the one contract that resolved YES, or the
+ * extra "none of the listed" outcome when none did.
+ */
 export function winningBucket(info: LadderInfo, e: RawEvent): number | null {
   const bySym = contractsBySymbol(e);
   const sides = info.symbols.map((s) => bySym.get(s)?.resolutionSide ?? null);
   if (sides.some((s) => s === null)) return null;
-  if (info.kind === "threshold") return sides.filter((s) => s === "yes").length;
+  if (info.kind === "threshold") return sides.filter((s, i) => (info.below?.[i] ? s === "no" : s === "yes")).length;
   const j = sides.indexOf("yes");
-  return j >= 0 ? j : null;
+  if (j >= 0) return j;
+  return info.none ? info.symbols.length : null;
 }
 
 function settle(db: DB, pos: PositionRow, legs: LegRow[], e: RawEvent) {

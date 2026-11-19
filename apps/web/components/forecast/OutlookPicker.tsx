@@ -37,6 +37,14 @@ function bell({ mu, s, split }: Curve) {
   return `M${pts.join(" L")}`;
 }
 
+/** On a ladder of dates ("When will Stripe announce an IPO?"), the same four views in time words. */
+const DATE_WORDS: Record<Outlook, { title: string; sub: (c: string) => string }> = {
+  higher: { title: "Later", sub: (c) => `after ${c}` },
+  lower: { title: "Sooner", sub: (c) => `before ${c}` },
+  near: { title: "Around", sub: (c) => `around ${c}` },
+  move: { title: "Far off", sub: (c) => `far from ${c}` },
+};
+
 export function OutlookPicker({
   value,
   onPick,
@@ -49,7 +57,10 @@ export function OutlookPicker({
   prompt = false,
   settles,
   unavailable = [],
+  dates = false,
 }: {
+  /** The ladder is about when something happens: the outlooks read Later / Sooner instead of Higher / Lower. */
+  dates?: boolean;
   /** Outlooks with no tradable position on this market at any strength or confidence. */
   unavailable?: Outlook[];
   value: Outlook | null;
@@ -142,13 +153,13 @@ export function OutlookPicker({
                   aria-checked={on}
                   aria-disabled={off}
                   disabled={off}
-                  title={off ? `No ${o.title.toLowerCase()} position is worth buying at these prices, even at full confidence.` : undefined}
+                  title={off ? `No ${(dates ? DATE_WORDS[o.key].title : o.title).toLowerCase()} position is worth buying at these prices, even at full confidence.` : undefined}
                   tabIndex={on || (active < 0 && i === 0) ? 0 : -1}
                   onClick={() => !off && onPick(o.key)}
                   className={`${chip(on)} ${off ? "pointer-events-none opacity-45" : ""}`}
                 >
                   <span className="flex items-center justify-between gap-1.5">
-                    <span className={`truncate text-[15px] font-bold leading-tight ${on ? "text-signal-violet" : "text-inkstone"}`}>{o.title}</span>
+                    <span className={`truncate text-[15px] font-bold leading-tight ${on ? "text-signal-violet" : "text-inkstone"}`}>{dates ? DATE_WORDS[o.key].title : o.title}</span>
                   {/* the shape of this outlook against the market's (dashed) */}
                   <svg viewBox="0 0 100 40" className="h-5 w-8 shrink-0 max-xl:lg:hidden" aria-hidden="true" preserveAspectRatio="none">
                     <path d={bell(MARKET_CURVE)} fill="none" stroke="var(--color-ash)" strokeWidth="1.5" strokeDasharray="3 3" vectorEffect="non-scaling-stroke" />
@@ -162,7 +173,7 @@ export function OutlookPicker({
                     />
                   </svg>
                   </span>
-                  <span className="tnum mt-0.5 block truncate text-[12.5px] text-slate">{off ? "no trade at these prices" : o.sub(center)}</span>
+                  <span className="tnum mt-0.5 block truncate text-[12.5px] text-slate">{off ? "no trade at these prices" : dates ? DATE_WORDS[o.key].sub(center) : o.sub(center)}</span>
                 </button>
               );
             })}

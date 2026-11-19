@@ -67,10 +67,11 @@ export function buildInstruments(ladder: Ladder, feeRate = 0, shape: PositionSha
     for (const i of tradable)
       for (const j of tradable) {
         if (j <= i) continue;
-        // The pair pays $2 on outcomes i + 1 … j.
+        // The pair pays $2 on outcomes i + 1 … j: "at or above strike i" plus "below strike j". On a
+        // ladder that reads the other way ("Before …"), those are strike i's NO and strike j's YES.
         if (around !== undefined && (around < i + 1 || around > j)) continue;
-        const y = single(i, "yes");
-        const n = single(j, "no");
+        const y = single(i, ladder.instruments[i].below ? "no" : "yes");
+        const n = single(j, ladder.instruments[j].below ? "yes" : "no");
         // A pair at $1 or less (the two asks disagree: free money) would pay back its cost outside
         // its range too, and break the promise that a range loses on both sides. Leave it out.
         if (y.cost + n.cost <= 1) continue;

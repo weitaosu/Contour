@@ -21,8 +21,8 @@ import { usePortfolio } from "@/lib/paper";
 const dollars = (n: number) => usd(n, Math.abs(n) >= 100 ? 0 : 2);
 
 /**
- * The last screen before signing: the position in plain words, what happens on confirm, and an
- * explicit acknowledgement of the worst case. Owns the wallet / faucet / open-position flow.
+ * The last screen before signing: the position in plain words (worst case included), what happens
+ * on confirm, and a short standard risk line. Owns the wallet / faucet / open-position flow.
  */
 export function ReviewDialog({
   open,
@@ -59,7 +59,6 @@ export function ReviewDialog({
   const wins = payouts.map((p) => isWin(p, stake));
   const zones = runs(wins, (w) => w);
   const chance = ladder.marketProb.reduce((s, p, j) => s + (wins[j] ? p : 0), 0);
-  const [ack, setAck] = useState(false);
   // Direct-payment mode: the USDC goes straight to this wallet instead of an escrow.
   const payTo = useDeskConfig().data?.payTo ?? null;
   // No wallet connected: the trade goes into the paper portfolio instead.
@@ -74,7 +73,6 @@ export function ReviewDialog({
     <Dialog.Root
       open={open}
       onOpenChange={(o) => {
-        if (!o) setAck(false);
         onOpenChange(o);
       }}
     >
@@ -83,7 +81,7 @@ export function ReviewDialog({
         <Dialog.Content className="fade-up fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto rounded-t-[32px] bg-porcelain px-6 pb-8 pt-6 md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:w-[min(560px,calc(100vw-32px))] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[36px] md:p-8">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
-              <p className="eyebrow">{confidence === null ? "Review your protection" : "Review your hedge"}</p>
+              <p className="eyebrow">{confidence === null ? "Review your protection" : "Review your bet"}</p>
               <Dialog.Title className="mt-1 text-[24px] font-bold leading-tight text-inkstone">{ladder.title}</Dialog.Title>
               <p className="mt-1 text-[14px] text-slate">Settles {settleLabel(ladder.expiry)}</p>
             </div>
@@ -234,33 +232,20 @@ export function ReviewDialog({
             )}
           </div>
 
-          <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-[16px] border border-mist px-4 py-3 text-[15px] text-inkstone hover:border-ash">
-            <span className="relative mt-0.5 inline-flex h-5 w-5 shrink-0 items-center justify-center">
-              <input type="checkbox" className="peer absolute inset-0 cursor-pointer opacity-0" checked={ack} onChange={(e) => setAck(e.target.checked)} />
-              <span className="h-5 w-5 rounded-[6px] border-2 border-ash bg-porcelain peer-checked:border-signal-violet peer-checked:bg-signal-violet peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-signal-violet" />
-              <Check size={14} strokeWidth={3} className="pointer-events-none absolute text-white opacity-0 peer-checked:opacity-100" aria-hidden="true" />
-            </span>
-            <span>
-              {protection?.cap && protection.backInMiddle !== undefined ? (
-                <>
-                  I understand I give up gains above {protection.cap} (up to {protection.capTop}): the higher it ends past {protection.cap}, the less this position
-                  pays back, as little as <b className="tnum">{usd(quote.minPayout)}</b> of my {usd(stake)}, while what I hold is worth more.
-                </>
-              ) : protection ? (
-                <>
-                  I understand this protection expires worthless if it ends at {protection.floor} or above, and I lose the <b className="tnum">{usd(stake)}</b> it costs.
-                </>
-              ) : (
-                <>
-                  I understand I could lose up to <b className="tnum">{usd(stake - quote.minPayout)}</b>
-                  {stake - quote.minPayout < pay - 0.005 ? <>, getting back as little as {usd(quote.minPayout - kept)} of the {usd(pay)} I pay</> : <>, everything I pay</>}.
-                </>
-              )}
-            </span>
-          </label>
+          {/* No "I understand I could lose…" checkbox: the worst case is in the summary above, and a
+              trading app doesn't make you sign it twice. A cap's trade-off isn't obvious, so it gets a plain line. */}
+          {protection?.cap && protection.backInMiddle !== undefined && (
+            <p className="mt-5 text-[13.5px] leading-snug text-slate">
+              Above {protection.cap} you give up gains (up to {protection.capTop}): the higher it ends past {protection.cap}, the less this position pays back, as little
+              as {usd(quote.minPayout)}, while what you hold is worth more.
+            </p>
+          )}
 
-          <ConfirmBlock ladder={ladder} server={server} stake={pay} payTo={payTo} quoteErr={quoteErr} age={age} ack={ack} viewLabel={viewLabel} />
+          <ConfirmBlock ladder={ladder} server={server} stake={pay} payTo={payTo} quoteErr={quoteErr} age={age} viewLabel={viewLabel} />
           <Dialog.Close className="btn btn-quiet btn-block mt-3">Back to edit</Dialog.Close>
+          <p className="mt-4 text-center text-[12px] leading-snug text-smoke">
+            Prediction markets are volatile and prices can move fast. Only trade what you can afford to lose. Not investment advice.
+          </p>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -303,7 +288,6 @@ function ConfirmBlock({
   payTo,
   quoteErr,
   age,
-  ack,
   viewLabel,
 }: {
   ladder: Ladder;
@@ -313,13 +297,12 @@ function ConfirmBlock({
   payTo: string | null;
   quoteErr: string | null;
   age: number | null;
-  ack: boolean;
   viewLabel: string;
 }) {
   const { publicKey } = useWallet();
   // No wallet: the trade goes into this browser's paper portfolio, filled at Gemini's live prices.
-  if (!publicKey) return <PaperConfirm ladder={ladder} server={server} stake={stake} quoteErr={quoteErr} age={age} ack={ack} viewLabel={viewLabel} />;
-  return <WalletConfirm ladder={ladder} server={server} stake={stake} payTo={payTo} quoteErr={quoteErr} age={age} ack={ack} />;
+  if (!publicKey) return <PaperConfirm ladder={ladder} server={server} stake={stake} quoteErr={quoteErr} age={age} viewLabel={viewLabel} />;
+  return <WalletConfirm ladder={ladder} server={server} stake={stake} payTo={payTo} quoteErr={quoteErr} age={age} />;
 }
 
 /** The paper stand-in for signing: fill the reviewed desk quote into the paper portfolio and open the position. */
@@ -329,7 +312,6 @@ function PaperConfirm({
   stake,
   quoteErr,
   age,
-  ack,
   viewLabel,
 }: {
   ladder: Ladder;
@@ -337,7 +319,6 @@ function PaperConfirm({
   stake: number;
   quoteErr: string | null;
   age: number | null;
-  ack: boolean;
   viewLabel: string;
 }) {
   const router = useRouter();
@@ -366,7 +347,7 @@ function PaperConfirm({
   const label = busy ? "Placing your trade…" : !server ? "Waiting for desk quote…" : short ? "Not enough paper cash" : `Place paper trade · ${usd(stake)}`;
   return (
     <div className="mt-5 flex flex-col gap-3">
-      <button className="btn btn-primary btn-block" disabled={busy || !server || !ack || !account || short} onClick={place}>
+      <button className="btn btn-primary btn-block" disabled={busy || !server || !account || short} onClick={place}>
         {label}
       </button>
       <p className="text-[14px] text-smoke">
@@ -398,7 +379,6 @@ function WalletConfirm({
   payTo,
   quoteErr,
   age,
-  ack,
 }: {
   ladder: Ladder;
   server: StoredQuote | null;
@@ -406,7 +386,6 @@ function WalletConfirm({
   payTo: string | null;
   quoteErr: string | null;
   age: number | null;
-  ack: boolean;
 }) {
   const router = useRouter();
   const qc = useQueryClient();
@@ -519,8 +498,6 @@ function WalletConfirm({
     disabled = !cfg.data?.faucetEnabled;
   } else if (!server) {
     label = "Waiting for desk quote…";
-    disabled = true;
-  } else if (!ack) {
     disabled = true;
   }
   if (busy) {
