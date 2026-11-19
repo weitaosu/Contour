@@ -3,6 +3,17 @@ import type { EventsPage, RawBook, RawEvent } from "./types";
 
 export const GEMINI_API_BASE = "https://api.gemini.com";
 
+export interface RawTicker {
+  symbol: string;
+  open: string;
+  high: string;
+  low: string;
+  close: string;
+  bid: string;
+  ask: string;
+  changes?: string[];
+}
+
 export interface ListEventsParams {
   status?: "active" | "settled" | string;
   category?: string;
@@ -17,8 +28,9 @@ export class GeminiPublicClient {
     private base: string = GEMINI_API_BASE,
     opts: { ratePerSec?: number; burst?: number; fetchImpl?: typeof fetch } = {},
   ) {
-    // Gemini documents ~120 req/min for public endpoints; budget 1 req/s with a small burst.
-    this.limiter = new TokenBucket(opts.ratePerSec ?? 1, opts.burst ?? 8);
+    // Gemini documents ~120 req/min for public endpoints; budget 1.5 req/s (90/min) with a small burst.
+    // Live pages poll one event and one spot ticker every few seconds, shared across viewers by the desk.
+    this.limiter = new TokenBucket(opts.ratePerSec ?? 1.5, opts.burst ?? 8);
     this.fetchImpl = opts.fetchImpl ?? fetch;
   }
   private fetchImpl: typeof fetch;
@@ -59,6 +71,11 @@ export class GeminiPublicClient {
 
   getCategories(): Promise<{ categories: string[] }> {
     return this.get("/v1/prediction-markets/categories");
+  }
+
+  /** Spot ticker for a trading pair such as "btcusd": last price, best bid/ask, and the price 24 h ago (`open`). */
+  getTicker(pair: string): Promise<RawTicker> {
+    return this.get<RawTicker>(`/v2/ticker/${encodeURIComponent(pair)}`);
   }
 
   /** Order book for one instrument. YES asks are `asks`; a NO ask at price p equals a YES bid at 1-p. */

@@ -6,6 +6,7 @@ import { Dialog } from "radix-ui";
 import { X } from "lucide-react";
 import { useEffect, useState } from "react";
 import { short } from "@/lib/format";
+import { env, network, networkLabel } from "@/lib/env";
 
 export function useConnectDialog() {
   const [open, setOpen] = useState(false);
@@ -34,7 +35,7 @@ export function WalletDialog({ open, onOpenChange }: { open: boolean; onOpenChan
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(440px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-[36px] border border-mist bg-porcelain p-8">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="eyebrow">Solana devnet</p>
+              <p className="eyebrow">{networkLabel}</p>
               <Dialog.Title className="mt-1 text-[26px] font-bold leading-tight">Connect a wallet</Dialog.Title>
             </div>
             <Dialog.Close className="rounded-full p-2 text-slate hover:bg-cloud" aria-label="Close">
@@ -42,7 +43,16 @@ export function WalletDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             </Dialog.Close>
           </div>
           <Dialog.Description className="mt-3 text-slate">
-            Contour runs on devnet with test USDC. Switch your wallet to devnet before signing.
+            {network === "localnet" ? (
+              <>
+                Contour is running on a local Solana validator with test USDC. Point your wallet at <span className="tnum font-bold text-inkstone">{env.rpcUrl}</span>{" "}
+                (Phantom: Settings → Developer settings) before signing.
+              </>
+            ) : network === "mainnet" ? (
+              "Contour is running on Solana mainnet. Check every amount before you sign."
+            ) : (
+              "Contour runs on devnet with test USDC. Switch your wallet to devnet before signing."
+            )}
           </Dialog.Description>
           <div className="mt-6 flex flex-col gap-3">
             {detected.length === 0 && (

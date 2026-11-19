@@ -1,3 +1,4 @@
+import { pathToFileURL } from "node:url";
 import cors from "@fastify/cors";
 import { GeminiPublicClient } from "@contour/gemini";
 import Fastify from "fastify";
@@ -56,18 +57,24 @@ export async function buildServer() {
 
   app.get("/markets", async (req) => {
     const q = z.object({ category: z.string().optional(), search: z.string().optional() }).parse(req.query);
-    const { markets: all, rejected, updatedAt } = await markets.listMarkets();
+    const { markets: all, rejected, updatedAt, frozenAt, sections } = await markets.listMarkets();
     const s = q.search?.toLowerCase().trim();
     const filtered = all.filter(
       (m) => (!q.category || m.category === q.category) && (!s || m.title.toLowerCase().includes(s) || m.ticker.toLowerCase().includes(s)),
     );
-    return { markets: filtered, rejected, updatedAt };
+    return { markets: filtered, rejected, updatedAt, frozenAt, sections };
   });
 
   app.get("/markets/:ticker", async (req) => {
     const { ticker } = z.object({ ticker: z.string().min(1) }).parse(req.params);
-    const { ladder, capturedAt, event } = await markets.getLadder(ticker);
-    return { ladder, capturedAt, volume: event.volume ? Number(event.volume) : null };
+    const { ladder, capturedAt, event, frozen, sample } = await markets.getLadder(ticker);
+    return { ladder, capturedAt, volume: event.volume ? Number(event.volume) : null, frozen, sample };
+  });
+
+  // Fast tier for market pages: spot price and current asks, polled every few seconds.
+  app.get("/live/:ticker", async (req) => {
+    const { ticker } = z.object({ ticker: z.string().min(1) }).parse(req.params);
+    return markets.live(ticker);
   });
 
   const quoteBody = z.object({
@@ -75,6 +82,15 @@ export async function buildServer() {
     belief: z.array(z.number().nonnegative()).min(2).max(40),
     confidence: z.number().min(0).max(1),
     stakeUsd: z.number().positive().max(100_000),
+    // Holding strategies, priced from NO contracts: floor = protect; floor + cap = collar; cap only = covered call.
+    protect: z
+      .object({ units: z.number().positive().max(1_000_000), floor: z.number().finite().optional(), cap: z.number().finite().optional() })
+      .refine((p) => p.floor !== undefined || p.cap !== undefined, "protect needs a floor, a cap, or both")
+      .optional(),
+    // Call/put spread: equal steps between two strikes, sized to stakeUsd.
+    spread: z.object({ direction: z.enum(["up", "down"]), from: z.number().finite(), to: z.number().finite() }).optional(),
+    // "range" (Stays near): only positions that lose on both sides of the range.
+    shape: z.enum(["free", "range"]).optional(),
   });
   app.post("/quote", async (req) => {
     const body = quoteBody.parse(req.body);
@@ -138,7 +154,7 @@ export async function buildServer() {
   return { app, db, markets, hub, gemini, ctx };
 }
 
-const isMain = import.meta.url === `file://${process.argv[1]}`;
+const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const { app } = await buildServer();
   await app.listen({ port: config.port, host: config.host });

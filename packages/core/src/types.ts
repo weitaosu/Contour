@@ -44,7 +44,10 @@ export interface Leg {
   instrumentIndex: number;
   price: number;
   qty: number;
+  /** Contract cost at the ask (qty × price), excluding the fee. */
   usd: number;
+  /** Gemini trading fee for this leg's order, rounded up to the cent. */
+  fee: number;
   capped?: boolean;
 }
 
@@ -54,6 +57,8 @@ export interface Comparison {
   side: "yes" | "no";
   price: number;
   qty: number;
+  /** Gemini trading fee for buying `qty` at `price`; qty is sized so contracts + fee fit in the stake. */
+  fee: number;
   payoutIfWin: number;
   probWinBelief: number;
   probWinMarket: number;
@@ -61,7 +66,12 @@ export interface Comparison {
 
 export interface Quote {
   legs: Leg[];
+  /** Stake left as cash in escrow: stake − Σ leg.usd − feesUsd, exact to the base unit. */
   cashUsd: number;
+  /** Total Gemini trading fees across all legs (already taken out of the payout schedule). */
+  feesUsd: number;
+  /** Fee rate the quote was priced with (Gemini taker rate unless overridden). */
+  feeRate: number;
   payoutByBucket: number[]; // USD, final, after post-processing
   scheduleBase: number[]; // USDC base units (6 dp), the on-chain schedule
   stakeBase: number;
@@ -77,7 +87,7 @@ export interface Quote {
   maxAbsorbableStakeUsd: number | null;
   raw: {
     weights: number[];
-    instruments: { index: number; side: "cash" | "yes" | "no"; price: number }[];
+    instruments: { index: number; side: "cash" | "yes" | "no" | "pair"; price: number }[];
     payoutByBucket: number[];
     expectedLogGrowth: number;
     iterations: number;

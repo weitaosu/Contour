@@ -6,14 +6,18 @@ const reducedMotion = () => typeof window !== "undefined" && window.matchMedia?.
 
 /**
  * Eases an array of numbers toward its target every animation frame (exponential approach,
- * frame-rate independent). Snaps when the length changes or the user prefers reduced motion.
+ * frame-rate independent). Snaps when the length changes or the user prefers reduced motion, and
+ * follows the target exactly while `immediate` is on (direct manipulation: the curve stays under the
+ * pointer), so switching it off never jumps.
  */
-export function useTweenedArray(target: readonly number[], speed = 0.2): number[] {
+export function useTweenedArray(target: readonly number[], speed = 0.2, immediate = false): number[] {
   const [value, setValue] = useState<number[]>(() => [...target]);
   const cur = useRef<number[]>([...target]);
   const raf = useRef<number | null>(null);
   useEffect(() => {
-    if (cur.current.length !== target.length || reducedMotion()) {
+    if (cur.current.length !== target.length || immediate || reducedMotion()) {
+      if (raf.current) cancelAnimationFrame(raf.current);
+      raf.current = null;
       cur.current = [...target];
       setValue([...target]);
       return;
@@ -46,8 +50,113 @@ export function useTweenedArray(target: readonly number[], speed = 0.2): number[
       if (raf.current) cancelAnimationFrame(raf.current);
       raf.current = null;
     };
-  }, [target, speed]);
-  return value;
+  }, [target, speed, immediate]);
+  return immediate ? (target as number[]) : value;
+}
+
+/**
+ * Morphs an array of numbers to its target on a critically damped spring (no overshoot), settling
+ * in about `duration` ms. A new target mid-flight keeps the current velocity instead of restarting
+ * from rest, so a stream of targets (a curve being dragged) reads as one fluid motion rather than a
+ * stutter of restarts. Every element shares the same spring, so bars, scales and axes packed into
+ * one array move in lockstep. Snaps when the length changes or the user prefers reduced motion.
+ */
+export interface MorphOptions {
+  /** Where the values start on first render, so the chart animates in (an entrance) instead of appearing. */
+  from?: readonly number[];
+  /**
+   * Milliseconds element i waits before heading to a new target, so a row of bars moves as a wave
+   * rather than all at once. Ignored while `immediate`.
+   */
+  delay?: (i: number, goal: readonly number[]) => number;
+  /** Follow the target exactly (direct manipulation), with the spring kept in step so letting go never jumps. */
+  immediate?: boolean;
+}
+
+export function useMorph(target: readonly number[], duration = 480, opts: MorphOptions = {}): number[] {
+  const start = opts.from && opts.from.length === target.length ? opts.from : target;
+  const [value, setValue] = useState<number[]>(() => [...start]);
+  const cur = useRef<number[]>([...start]);
+  const vel = useRef<number[]>(start.map(() => 0));
+  // Per element: the goal it's heading to now, and the goal it switches to at `release[i]`.
+  const goal = useRef<number[]>([...start]);
+  const pending = useRef<readonly number[]>(target);
+  const release = useRef<number[]>(target.map(() => 0));
+  const raf = useRef<number | null>(null);
+  const delay = useRef(opts.delay);
+  delay.current = opts.delay;
+  const immediate = !!opts.immediate;
+  // Keyed on the values, not the array: a parent re-rendering with an equal new array (every second,
+  // for a countdown) must not disturb a morph mid-flight.
+  const latest = useRef(target);
+  latest.current = target;
+  const sig = target.map((v) => Math.round(v * 1e6) / 1e6).join(",");
+  // Half-way after ~28% of `duration`, within ~2% at `duration` (ω·t = 6).
+  const omega = 6000 / Math.max(1, duration);
+  useEffect(() => {
+    const target = latest.current;
+    pending.current = target;
+    if (cur.current.length !== target.length || reducedMotion() || immediate) {
+      if (raf.current) cancelAnimationFrame(raf.current);
+      raf.current = null;
+      cur.current = [...target];
+      vel.current = target.map(() => 0);
+      goal.current = [...target];
+      release.current = target.map(() => 0);
+      setValue([...target]);
+      return;
+    }
+    const now = performance.now();
+    release.current = target.map((_, i) => now + Math.max(0, delay.current?.(i, target) ?? 0));
+    if (raf.current !== null) return; // already running: it picks up the new goals as they're released
+    if (cur.current.every((v, i) => Math.abs(v - target[i]) < 1e-9 && Math.abs(vel.current[i]) < 1e-9)) {
+      goal.current = [...target];
+      return;
+    }
+    let last: number | null = null;
+    const step = (now: number) => {
+      const g = goal.current;
+      const pend = pending.current;
+      // Seconds since the last frame, capped so a background tab doesn't teleport on return.
+      const dt = last === null ? 1 / 60 : Math.min(0.064, Math.max(0, (now - last) / 1000));
+      last = now;
+      const decay = Math.exp(-omega * dt);
+      let settled = true;
+      const x = cur.current.map((c, i) => {
+        if (now >= release.current[i]) g[i] = pend[i];
+        else settled = false;
+        // Exact critically damped step: d(t) = (d0 + (v0 + ω·d0)·t)·e^(−ωt), stable at any frame rate.
+        const d0 = c - g[i];
+        const v0 = vel.current[i];
+        const b = v0 + omega * d0;
+        const d = (d0 + b * dt) * decay;
+        vel.current[i] = (v0 - omega * b * dt) * decay;
+        const tol = 1e-4 * (1 + Math.abs(g[i]));
+        if (Math.abs(d) > tol || Math.abs(vel.current[i]) > tol * omega) settled = false;
+        return g[i] + d;
+      });
+      if (settled || !x.every(Number.isFinite)) {
+        cur.current = [...pend];
+        vel.current = pend.map(() => 0);
+        goal.current = [...pend];
+        setValue([...pend]);
+        raf.current = null;
+        return;
+      }
+      cur.current = x;
+      setValue(x);
+      raf.current = requestAnimationFrame(step);
+    };
+    raf.current = requestAnimationFrame(step);
+  }, [sig, omega, immediate]);
+  useEffect(
+    () => () => {
+      if (raf.current) cancelAnimationFrame(raf.current);
+      raf.current = null;
+    },
+    [],
+  );
+  return immediate ? (target as number[]) : value;
 }
 
 export function useTweenedNumber(target: number, speed = 0.2): number {
