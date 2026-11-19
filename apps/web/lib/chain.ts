@@ -54,13 +54,14 @@ export function useUsdcBalance(owner: PublicKey | null | undefined, mint: Public
     enabled: !!owner && !!mint,
     queryFn: async () => {
       try {
-        const b = await connection.getTokenAccountBalance(ata(mint!, owner!));
+        // "confirmed", so a payment or faucet claim shows up right away rather than after finalization.
+        const b = await connection.getTokenAccountBalance(ata(mint!, owner!), "confirmed");
         return Number(b.value.uiAmount ?? 0);
       } catch {
         return 0;
       }
     },
-    refetchInterval: 20_000,
+    refetchInterval: 10_000,
   });
 }
 

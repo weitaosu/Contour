@@ -63,6 +63,8 @@ function ReplayPageContent() {
   const computedTime = at ? at.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" }) : null;
   const computedDay = at ? at.toLocaleDateString("en-US", { month: "short", day: "numeric", timeZone: "America/New_York" }) : null;
   // "Snapshot 30 min before expiry for hourly ladders, …" reads as the step's own description.
+  const simulated = d?.simulated ?? 0;
+  const allSimulated = !!d && simulated > 0 && simulated === d.sampleSize;
   const horizon = (d?.horizonNote ?? "a fixed time before each ladder settles").replace(/\.$/, "").replace(/^Snapshot\s+/i, "");
 
   return (
@@ -70,12 +72,20 @@ function ReplayPageContent() {
       {/* Intro beside the result, as on the front page */}
       <div className="grid items-stretch gap-2 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.45fr)]">
         <section className="flex min-w-0 flex-col rounded-[24px] bg-cloud p-5 xl:p-6">
-          <p className="text-[12.5px] uppercase tracking-[0.075em] text-smoke">Replay · recorded Gemini ladders</p>
+          <p className="text-[12.5px] uppercase tracking-[0.075em] text-smoke">
+            Replay · {allSimulated ? "simulated Gemini-style ladders" : simulated > 0 ? "recorded and simulated ladders" : "recorded Gemini ladders"}
+          </p>
           <h1 className="mt-3 text-[34px] font-bold leading-[1.05] tracking-[0.01em] text-inkstone xl:text-[42px]">One contract versus the whole view</h1>
           <p className="mt-3 max-w-[520px] text-[15px] leading-relaxed text-slate">
             Past Gemini ladders, replayed: the same test forecasts placed as a $100 Contour position and as the single best contract for that forecast, then settled
             against what actually happened.
           </p>
+          {simulated > 0 && (
+            <p className="mt-3 max-w-[520px] rounded-[14px] bg-signal-violet/10 px-3 py-2 text-[13.5px] leading-snug text-inkstone">
+              <b>Demo data.</b> {allSimulated ? "All" : `${simulated} of the`} {d?.sampleSize} ladders are simulated: Gemini&apos;s real ladder formats and today&apos;s
+              prices, with past prices and outcomes from a random walk. The comparison itself runs the same code as on recorded ladders.
+            </p>
+          )}
           <ol className="mt-5 flex flex-col gap-2.5 text-[14px]">
             {[
               ["Snapshot", horizon],

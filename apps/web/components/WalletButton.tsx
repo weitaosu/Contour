@@ -109,7 +109,7 @@ export function WalletButton() {
   );
 }
 
-/** The connected wallet: the full address (copyable), its test USDC, the record, and log out. */
+/** The connected wallet: the full address (copyable), its test USDC, the portfolio, and log out. */
 function WalletMenu({ address }: { address: string }) {
   const { wallet, publicKey, disconnect } = useWallet();
   const mint = useUsdcMint();
@@ -169,7 +169,7 @@ function WalletMenu({ address }: { address: string }) {
 
           <div className="mt-4 flex flex-col gap-1 border-t border-mist pt-3 text-[14px]">
             <Link href="/me" onClick={() => setOpen(false)} className="flex items-center justify-between rounded-[12px] px-2 py-2 font-medium text-inkstone hover:bg-cloud">
-              My record <ChevronRight size={16} className="text-smoke" />
+              My portfolio <ChevronRight size={16} className="text-smoke" />
             </Link>
             <a
               href={explorerAddr(address)}

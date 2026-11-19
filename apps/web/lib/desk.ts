@@ -86,6 +86,8 @@ export interface PaperRequest {
 }
 export interface PaperPositionSummary {
   id: string;
+  /** Where the position's page is, when it isn't a paper position (wallet positions: /p/<pubkey>). */
+  href?: string;
   ticker: string;
   title: string;
   category: string | null;
@@ -255,6 +257,8 @@ export const desk = {
       j<StoredQuote>(r),
     ),
   position: (pubkey: string) => fetch(`${env.deskUrl}/positions/${pubkey}`).then((r) => (r.status === 404 ? null : j<PositionView>(r))),
+  /** The wallet's paid positions as a portfolio: open ones valued live, settled ones at what they paid. */
+  walletPortfolio: (owner: string) => fetch(`${env.deskUrl}/wallets/${owner}/portfolio`).then((r) => j<PaperPortfolio>(r)),
   record: (owner: string) => fetch(`${env.deskUrl}/wallets/${owner}/record`).then((r) => j<RecordView>(r)),
   replay: () => fetch(`${env.deskUrl}/replay`).then((r) => j<ReplayView>(r)),
   faucet: (owner: string) =>
@@ -323,6 +327,8 @@ export interface RecordView {
 
 export interface ReplayView {
   sampleSize: number;
+  /** How many of those ladders are simulated for the demo rather than recorded from Gemini. */
+  simulated?: number;
   ladders?: number;
   horizonNote?: string;
   generatedAt?: string;

@@ -4,6 +4,7 @@ import { config } from "../config";
 import type { DB } from "../db";
 import type { MarketService } from "../markets";
 import type { SseHub } from "../sse";
+import { walletPortfolio } from "../walletPortfolio";
 
 export interface Ctx {
   db: DB;
@@ -43,6 +44,12 @@ export function registerPositionRoutes(app: FastifyInstance, ctx: Ctx) {
     const origin = req.headers.origin && config.webOrigin.includes(req.headers.origin) ? req.headers.origin : undefined;
     ctx.hub.subscribe(pubkey, reply, origin);
     return reply;
+  });
+
+  // The wallet's positions as a portfolio: open ones valued live, settled ones at what they paid.
+  app.get("/wallets/:owner/portfolio", async (req) => {
+    const { owner } = z.object({ owner: z.string().min(32).max(64) }).parse(req.params);
+    return walletPortfolio(ctx.db, ctx.markets, owner);
   });
 
   app.get("/wallets/:owner/record", async (req) => {

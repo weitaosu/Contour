@@ -13,6 +13,9 @@ export function openDb(path = process.env.DB_PATH ?? resolve(process.cwd(), "../
   // Direct-payment positions (see recordDirectPayment) name the wallet that was paid.
   const cols = db.prepare("PRAGMA table_info(positions)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "pay_to")) db.exec("ALTER TABLE positions ADD COLUMN pay_to TEXT");
+  // Simulated ladders written by scripts/seed-sim.ts for the demo (never by the recorder), so replay can say so.
+  const ladderCols = db.prepare("PRAGMA table_info(ladders)").all() as { name: string }[];
+  if (!ladderCols.some((c) => c.name === "demo")) db.exec("ALTER TABLE ladders ADD COLUMN demo INTEGER NOT NULL DEFAULT 0");
   return db;
 }
 

@@ -18,7 +18,8 @@
     "dev:desk:local": "pnpm --filter @contour/desk exec env DOTENV_CONFIG_PATH=.env.localnet tsx watch src/server.ts",
     "dev:web:local": "cd apps/web && sh -c 'set -a; . ./.env.localnet; set +a; exec pnpm exec next dev --port 3000'",
     "e2e:local": "pnpm --filter @contour/desk exec env DOTENV_CONFIG_PATH=.env.localnet tsx scripts/e2e.ts SOL2611202200 0.6 0.5",
-    "e2e:devnet": "pnpm --filter @contour/desk exec env E2E_POST_STREAM=0 tsx scripts/e2e.ts SOL2611202200 0.6 0.5"
+    "e2e:devnet": "pnpm --filter @contour/desk exec env E2E_POST_STREAM=0 tsx scripts/e2e.ts SOL2611202200 0.6 0.5",
+    "demo:seed": "pnpm --filter @contour/desk seed:sim"
   },
   "devDependencies": {
     "typescript": "^5.9.3",

@@ -10,7 +10,8 @@
     "snapshot": "tsx scripts/snapshot.ts",
     "qc": "tsx scripts/qc.ts",
     "test": "vitest run",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "seed:sim": "tsx scripts/seed-sim.ts"
   },
   "dependencies": {
     "@anchor-lang/core": "1.2.2",

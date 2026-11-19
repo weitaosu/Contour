@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
-import { useQueryClient } from "@tanstack/react-query";
-import { ArrowDownRight, ArrowUpRight, ChevronRight, RotateCcw } from "lucide-react";
-import { desk, type PaperPortfolio, type PaperPositionSummary, type PaperTrade } from "@/lib/desk";
-import { strategyName, usePortfolio } from "@/lib/paper";
-import { pct, settleLabel, untilLabel, usd } from "@/lib/format";
+import { useEffect, useState } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { useWallet } from "@solana/wallet-adapter-react";
+import { ArrowDownRight, ArrowUpRight, ChevronRight, Wallet } from "lucide-react";
+import { desk, type PaperPositionSummary, type PaperTrade } from "@/lib/desk";
+import { PORTFOLIO_MS, strategyName } from "@/lib/paper";
+import { pct, short, untilLabel, usd } from "@/lib/format";
+import { WalletDialog } from "@/components/WalletButton";
 import { Segmented } from "@/components/ui/Segmented";
 import { LiveDot } from "@/components/forecast/LivePrice";
 import { ValueChart } from "./ValueChart";
@@ -18,16 +20,29 @@ export const pnlPct = (pnl: number, cost: number) => (cost > 0.004 ? ` (${pnl >=
 type Tab = "open" | "closed" | "activity";
 
 /**
- * The paper portfolio in one view, after brokerage and prediction-market apps: the account's value
- * with its chart (Robinhood), a strip of cash, positions value and P&L, then open positions, closed
- * ones and the activity log as tabs (Kalshi). Positions are valued at what they'd sell for now.
+ * The connected wallet's portfolio in one view, after brokerage and prediction-market apps: the
+ * account's value with its chart (Robinhood), a strip of what's been paid in and out, positions value
+ * and P&L, then open positions, settled ones and the activity log as tabs (Kalshi). Every position is
+ * one the wallet paid for; open ones are valued at the mark. Without a wallet, it asks for one.
  */
-/** `embedded`: shown inside the Record tab, under its view switch (less top space). */
+/** `embedded`: shown under another control (less top space). */
 export function PortfolioScreen({ embedded = false }: { embedded?: boolean } = {}) {
-  const { account, data, isError, error } = usePortfolio();
-  const [tab, setTab] = useState<Tab>("open");
+  const { publicKey } = useWallet();
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  const owner = publicKey?.toBase58();
+  const { data, isError, error } = useQuery({
+    queryKey: ["wallet-portfolio", owner],
+    queryFn: () => desk.walletPortfolio(owner!),
+    enabled: !!owner,
+    refetchInterval: PORTFOLIO_MS,
+  });
+  // Until one is picked, open on the open positions, or on the settled ones when nothing is open.
+  const [picked, setTab] = useState<Tab | null>(null);
   const [scrub, setScrub] = useState<number | null>(null);
 
+  if (!mounted) return null;
+  if (!owner) return <ConnectPrompt embedded={embedded} />;
   if (isError)
     return (
       <div className="page py-24">
@@ -36,7 +51,7 @@ export function PortfolioScreen({ embedded = false }: { embedded?: boolean } = {
         <p className="mt-4 max-w-xl text-slate">{(error as Error).message}. The desk may be offline; it retries every few seconds.</p>
       </div>
     );
-  if (!data || !account)
+  if (!data)
     return (
       <div className="page py-16">
         <div className="h-6 w-56 rounded-full bg-cloud" />
@@ -49,6 +64,7 @@ export function PortfolioScreen({ embedded = false }: { embedded?: boolean } = {
   const t = data.totals;
   const open = data.positions.filter((p) => p.status === "open");
   const done = data.positions.filter((p) => p.status !== "open");
+  const tab: Tab = picked ?? (open.length || !done.length ? "open" : "closed");
   const shown = scrub ?? t.totalUsd;
   const change = shown - t.startUsd;
   // The headline P&L: how open positions have moved since they were bought. Entry costs (fees and
@@ -56,24 +72,25 @@ export function PortfolioScreen({ embedded = false }: { embedded?: boolean } = {
   const move = open.reduce((s, p) => s + p.moveUsd, 0);
   const entry = open.reduce((s, p) => s + p.entryCostUsd, 0);
   const openCost = open.reduce((s, p) => s + p.costUsd, 0);
+  // The change as a share of everything paid in (nothing to compare against before the first position).
+  const ofPaidIn = (x: number) => (t.startUsd > 0.004 ? ` (${x >= 0 ? "+" : "−"}${pct(Math.abs(x) / t.startUsd, 2)})` : "");
 
   return (
     <div className={`page pb-24 ${embedded ? "pt-5 md:pt-6" : "pt-10 md:pt-14"}`}>
       <header className="flex flex-col gap-1">
         <p className="eyebrow flex items-center gap-3">
-          Paper portfolio <LiveDot label="Valued live" />
+          Portfolio · {short(owner, 4)} <LiveDot label="Valued live" />
         </p>
         <h1 className="tnum mt-1 text-[40px] font-bold leading-none text-inkstone md:text-[52px]">{usd(shown)}</h1>
-        {data.demoAt !== null && (
-          <p className="mt-1 text-[13px] text-smoke">
-            Demo account: the history before {new Date(data.demoAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })} and positions tagged Demo are sample data. The
-            open positions are real paper trades at today&apos;s prices.
-          </p>
-        )}
         {scrub !== null ? (
           <p className={`tnum mt-1 text-[16px] font-bold ${tone(change)}`}>
-            {signedUsd(change)} ({change >= 0 ? "+" : "−"}
-            {pct(Math.abs(change) / t.startUsd, 2)}) <span className="font-normal text-smoke">vs your starting cash, at that point</span>
+            {signedUsd(change)}
+            {ofPaidIn(change)} <span className="font-normal text-smoke">vs what you paid in, at that point</span>
+          </p>
+        ) : !open.length ? (
+          <p className={`tnum mt-1 text-[16px] font-bold ${tone(change)}`}>
+            {signedUsd(change)}
+            {ofPaidIn(change)} <span className="font-normal text-smoke">all time</span>
           </p>
         ) : (
           <>
@@ -82,10 +99,10 @@ export function PortfolioScreen({ embedded = false }: { embedded?: boolean } = {
               {pnlPct(move, openCost)} <span className="font-normal text-smoke">since you bought</span>
             </p>
             <p className="tnum text-[14px] text-slate">
-              All time {signedUsd(change)} ({change >= 0 ? "+" : "−"}
-              {pct(Math.abs(change) / t.startUsd, 2)})
+              All time {signedUsd(change)}
+              {ofPaidIn(change)}
               {entry > 0.004 || Math.abs(t.realizedUsd) > 0.004
-                ? ` · includes ${[entry > 0.004 ? `${usd(entry)} entry costs` : null, Math.abs(t.realizedUsd) > 0.004 ? `${signedUsd(t.realizedUsd)} from closed trades` : null].filter(Boolean).join(" and ")}`
+                ? ` · includes ${[entry > 0.004 ? `${usd(entry)} entry costs` : null, Math.abs(t.realizedUsd) > 0.004 ? `${signedUsd(t.realizedUsd)} from settled positions` : null].filter(Boolean).join(" and ")}`
                 : ""}
             </p>
           </>
@@ -93,16 +110,16 @@ export function PortfolioScreen({ embedded = false }: { embedded?: boolean } = {
       </header>
 
       <section className="card mt-6">
-        <ValueChart points={data.history} reference={t.startUsd} referenceLabel="Started with" now={t.totalUsd} onScrub={(p) => setScrub(p?.valueUsd ?? null)} />
+        <ValueChart points={data.history} reference={t.startUsd} referenceLabel="Paid in" now={t.totalUsd} onScrub={(p) => setScrub(p?.valueUsd ?? null)} />
       </section>
 
       {/* the stat strip: where the money is, and how it's doing */}
       <section aria-label="Account" className="mt-6 grid grid-cols-2 gap-3 md:grid-cols-5">
-        <Stat label="Cash" value={usd(t.cashUsd)} sub="buying power" />
-        <Stat label="Positions" value={usd(t.positionsUsd)} sub={`at the mark · ${usd(t.cashOutUsd)} to cash out`} />
-        <Stat label="Since you bought" value={<span className={tone(move)}>{signedUsd(move)}</span>} sub={entry > 0.004 ? `open positions · ${usd(entry)} entry costs aside` : "open positions"} />
-        <Stat label="Closed return" value={<span className={tone(t.realizedUsd)}>{signedUsd(t.realizedUsd)}</span>} sub="realized" />
-        <Stat label="Open positions" value={String(t.openCount)} sub={`${done.length} closed or settled`} />
+        <Stat label="Paid in" value={usd(t.startUsd)} sub={`for ${data.positions.length} ${data.positions.length === 1 ? "position" : "positions"}`} />
+        <Stat label="Paid out" value={usd(t.cashUsd)} sub="settled, to your wallet" />
+        <Stat label="Open positions" value={usd(t.positionsUsd)} sub={`${t.openCount} open · at the mark`} />
+        <Stat label="Since you bought" value={<span className={tone(move)}>{signedUsd(move)}</span>} sub={entry > 0.004 ? `open positions · ${usd(entry)} fees aside` : "open positions"} />
+        <Stat label="Settled return" value={<span className={tone(t.realizedUsd)}>{signedUsd(t.realizedUsd)}</span>} sub={`${done.length} settled or refunded`} />
       </section>
 
       <section className="mt-8">
@@ -113,12 +130,13 @@ export function PortfolioScreen({ embedded = false }: { embedded?: boolean } = {
             onChange={setTab}
             options={[
               { value: "open", label: `Open · ${open.length}` },
-              { value: "closed", label: `Closed & settled · ${done.length}` },
+              { value: "closed", label: `Settled · ${done.length}` },
               { value: "activity", label: "Activity" },
             ]}
           />
           <p className="max-w-xl text-[13px] text-smoke">
-            Positions are valued at the mark, the midpoint of Gemini&apos;s bid and ask, as brokerages value holdings. Selling now fetches the bid, shown when you sell.
+            Open positions are valued at the mark, the midpoint of Gemini&apos;s bid and ask, as brokerages value holdings. Each pays out by its schedule when the
+            market settles.
           </p>
         </div>
         <div className="mt-4">
@@ -132,7 +150,6 @@ export function PortfolioScreen({ embedded = false }: { embedded?: boolean } = {
         </div>
       </section>
 
-      <ResetAccount account={account} data={data} />
     </div>
   );
 }
@@ -186,7 +203,7 @@ export function PositionList({ positions }: { positions: PaperPositionSummary[] 
         return (
           <li key={p.id}>
             <Link
-              href={`/portfolio/${p.id}`}
+              href={p.href ?? `/portfolio/${p.id}`}
               className="ease group grid grid-cols-[minmax(0,1fr)_auto] items-center gap-x-6 gap-y-2 rounded-[20px] bg-cloud px-5 py-4 hover:bg-mist md:grid-cols-[minmax(0,1.6fr)_repeat(3,minmax(0,0.7fr))_auto]"
             >
               <span className="min-w-0">
@@ -245,11 +262,11 @@ export function PositionList({ positions }: { positions: PaperPositionSummary[] 
 function Empty({ tab }: { tab: Tab }) {
   return (
     <div className="flex flex-col items-start gap-3 rounded-[24px] border border-dashed border-ash px-6 py-8">
-      <p className="text-[18px] font-bold text-inkstone">{tab === "open" ? "No open positions yet" : "Nothing closed or settled yet"}</p>
+      <p className="text-[18px] font-bold text-inkstone">{tab === "open" ? "No open positions" : "Nothing settled yet"}</p>
       <p className="max-w-xl text-slate">
         {tab === "open"
-          ? "Pick a market, set your outlook and review the hedge. Without a wallet, confirming places a paper trade at Gemini's live prices and it shows up here."
-          : "Positions you sell, and ones whose markets settle, move here with their final result."}
+          ? "Pick a market, set your outlook and confirm: your wallet pays, and the position shows up here, valued live."
+          : "When a position's market settles, it moves here with what it paid out."}
       </p>
       {tab === "open" && (
         <Link href="/" className="btn btn-primary">
@@ -312,41 +329,25 @@ export function Activity({ trades, showTitle = true }: { trades: PaperTrade[]; s
   );
 }
 
-/** Start over: with a fresh demo portfolio, or empty with $10,000. Two clicks, since it deletes every paper position. */
-function ResetAccount({ account, data }: { account: string; data: PaperPortfolio }) {
-  const qc = useQueryClient();
-  const [confirm, setConfirm] = useState(false);
-  const [busy, setBusy] = useState<null | "demo" | "empty">(null);
-  const reset = async (demo: boolean) => {
-    setBusy(demo ? "demo" : "empty");
-    await desk.paperReset(account, demo);
-    await qc.invalidateQueries({ queryKey: ["paper", account] });
-    setBusy(null);
-    setConfirm(false);
-  };
+/** No wallet connected: the portfolio is the wallet's positions, so ask for one. */
+function ConnectPrompt({ embedded }: { embedded: boolean }) {
+  const [dialog, setDialog] = useState(false);
   return (
-    <div className="mt-10 flex flex-wrap items-center gap-3 border-t border-mist pt-6 text-[14px] text-slate">
-      <span>
-        Paper account since {settleLabel(new Date(data.createdAt).toISOString())}, kept in this browser.
-      </span>
-      {confirm ? (
-        <span className="flex flex-wrap items-center gap-2">
-          <span className="font-bold text-inkstone">Delete every paper position and start over?</span>
-          <button type="button" disabled={!!busy} className="btn btn-quiet !px-4 !py-1.5" onClick={() => reset(true)}>
-            {busy === "demo" ? "Building the demo…" : "With a demo portfolio"}
-          </button>
-          <button type="button" disabled={!!busy} className="btn btn-quiet !px-4 !py-1.5" onClick={() => reset(false)}>
-            {busy === "empty" ? "Resetting…" : `Empty, with ${usd(data.totals.startUsd, 0)}`}
-          </button>
-          <button type="button" className="font-bold text-signal-violet" onClick={() => setConfirm(false)}>
-            Cancel
-          </button>
-        </span>
-      ) : (
-        <button type="button" className="inline-flex items-center gap-1.5 font-bold text-signal-violet hover:text-inkstone" onClick={() => setConfirm(true)}>
-          <RotateCcw size={14} strokeWidth={2.2} aria-hidden="true" /> Reset paper account
+    <div className={`page pb-24 ${embedded ? "pt-5 md:pt-6" : "pt-10 md:pt-14"}`}>
+      <p className="eyebrow">Portfolio</p>
+      <h1 className="title mt-2">Your portfolio lives with your wallet</h1>
+      <p className="mt-4 max-w-xl text-slate">
+        Log in with your wallet to see the positions it has paid for: open ones valued live at Gemini&apos;s prices, settled ones with what they paid out.
+      </p>
+      <div className="mt-6 flex flex-wrap gap-2">
+        <button type="button" className="btn btn-primary !gap-1.5" onClick={() => setDialog(true)}>
+          <Wallet size={16} strokeWidth={2.25} /> Connect wallet
         </button>
-      )}
+        <Link href="/" className="btn btn-quiet">
+          Browse markets
+        </Link>
+      </div>
+      <WalletDialog open={dialog} onOpenChange={setDialog} />
     </div>
   );
 }

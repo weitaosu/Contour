@@ -14,7 +14,7 @@ export const FORECASTS = [
 const CONFIDENCE = 0.5;
 const STAKE = 100;
 
-function horizonMs(ticker: string, title: string, category: string, lifeMs: number) {
+export function horizonMs(ticker: string, title: string, category: string, lifeMs: number) {
   if (/today/i.test(title)) return 30 * 60_000; // hourly ladders
   if (category === "Weather") return 6 * 3600_000;
   if (lifeMs > 3 * 86_400_000) return 24 * 3600_000; // weekly / monthly
@@ -30,12 +30,40 @@ interface LadderRow {
   first_seen: number;
   sides_json: string;
   settlement_value: string | null;
+  demo: number;
+}
+
+/**
+ * A recorded ladder as an event: its static contract fields, one snapshot's prices
+ * ({symbol: [yesAsk, noAsk, bestBid, bestAsk]}) and, once settled, each contract's resolution side.
+ */
+export function recordedEvent(
+  r: Pick<LadderRow, "ticker" | "title" | "category" | "expiry" | "contracts_json"> & { settlement_value?: string | null },
+  prices: Record<string, (number | null)[]>,
+  sides: Record<string, "yes" | "no"> = {},
+): EventLike & { settlement: { value?: string } } {
+  const statics = JSON.parse(r.contracts_json) as Record<string, EventLike["contracts"][number]>;
+  const s = (v: number | null) => (v === null ? undefined : String(v));
+  const contracts = Object.entries(prices).map(([sym, p]) => ({
+    ...statics[sym],
+    instrumentSymbol: sym,
+    prices: { buy: { yes: s(p[0]), no: s(p[1]) }, bestBid: s(p[2]) ?? null, bestAsk: s(p[3]) ?? null },
+    resolutionSide: sides[sym],
+  }));
+  return {
+    ticker: r.ticker,
+    title: r.title,
+    category: r.category,
+    expiryDate: r.expiry,
+    contracts,
+    settlement: { value: r.settlement_value ?? undefined },
+  };
 }
 
 export function computeReplay(db: DB) {
   const rows = db
     .prepare(
-      `SELECT l.ticker, l.title, l.category, l.expiry, l.contracts_json, l.first_seen, o.sides_json, o.settlement_value
+      `SELECT l.ticker, l.title, l.category, l.expiry, l.contracts_json, l.first_seen, l.demo, o.sides_json, o.settlement_value
        FROM ladders l JOIN outcomes o ON o.ticker = l.ticker ORDER BY l.expiry`,
     )
     .all() as LadderRow[];
@@ -46,6 +74,7 @@ export function computeReplay(db: DB) {
   const results: Record<string, { t: string; ticker: string; contour: number; single: number }[]> = {};
   for (const f of FORECASTS) results[f.id] = [];
   let used = 0;
+  let simulated = 0;
   let skipped = 0;
   for (const r of rows) {
     const expiry = new Date(r.expiry).getTime();
@@ -57,24 +86,7 @@ export function computeReplay(db: DB) {
       skipped++;
       continue;
     }
-    const statics = JSON.parse(r.contracts_json) as Record<string, EventLike["contracts"][number]>;
-    const prices = JSON.parse(snap.prices_json) as Record<string, (number | null)[]>;
-    const sides = JSON.parse(r.sides_json) as Record<string, "yes" | "no">;
-    const s = (v: number | null) => (v === null ? undefined : String(v));
-    const contracts = Object.entries(prices).map(([sym, p]) => ({
-      ...statics[sym],
-      instrumentSymbol: sym,
-      prices: { buy: { yes: s(p[0]), no: s(p[1]) }, bestBid: s(p[2]) ?? null, bestAsk: s(p[3]) ?? null },
-      resolutionSide: sides[sym],
-    }));
-    const ev: EventLike & { settlement: { value?: string } } = {
-      ticker: r.ticker,
-      title: r.title,
-      category: r.category,
-      expiryDate: r.expiry,
-      contracts,
-      settlement: { value: r.settlement_value ?? undefined },
-    };
+    const ev = recordedEvent(r, JSON.parse(snap.prices_json), JSON.parse(r.sides_json));
     let ladder;
     try {
       ladder = normalizeEvent(ev);
@@ -92,6 +104,7 @@ export function computeReplay(db: DB) {
       continue;
     }
     used++;
+    if (r.demo) simulated++;
     marketMoments(ladder);
     for (const f of FORECASTS) {
       const sd = marketMoments(ladder).sd;
@@ -121,6 +134,8 @@ export function computeReplay(db: DB) {
   ]);
   return {
     sampleSize: used,
+    /** How many of the ladders used are simulated demo data (scripts/seed-sim.ts) rather than recorded from Gemini. */
+    simulated,
     ladders: rows.length,
     skipped,
     horizonNote: "Snapshot 30 min before expiry for hourly ladders, 6 h for daily and weather, 24 h for weekly and monthly.",
