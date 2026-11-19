@@ -19,4 +19,8 @@ export const networkLabel = network === "localnet" ? "Local Solana validator" : 
 const clusterQuery =
   network === "localnet" ? `cluster=custom&customUrl=${encodeURIComponent(env.rpcUrl)}` : network === "mainnet" ? "" : "cluster=devnet";
 export const explorerTx = (sig: string) => `https://explorer.solana.com/tx/${sig}${clusterQuery ? `?${clusterQuery}` : ""}`;
-export const explorerAddr = (a: string) => `https://explorer.solana.com/address/${a}${clusterQuery ? `?${clusterQuery}` : ""}`;
+// Account pages open on a public test network, never mainnet: on the local validator that's devnet
+// (where the program and wallets also live), since the explorer can't browse a local chain's accounts.
+const accountClusterQuery = network === "mainnet" ? "" : "cluster=devnet";
+export const explorerAddr = (a: string) => `https://explorer.solana.com/address/${a}${accountClusterQuery ? `?${accountClusterQuery}` : ""}`;
+export const explorerAccountNetwork = network === "mainnet" ? "mainnet" : "devnet";

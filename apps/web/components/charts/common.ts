@@ -1,14 +1,16 @@
 import { scaleBand, scaleLinear } from "d3-scale";
 
+/** Chart colors as the theme's CSS variables, so every chart follows light and dark mode. */
 export const COLORS = {
-  violet: "#594ff4",
-  ink: "#1f1f1f",
-  slate: "#5d5d5d",
-  smoke: "#888888",
-  ash: "#b0b0b0",
-  mist: "#e7e7e7",
-  cloud: "#f6f6f6",
-  white: "#ffffff",
+  violet: "var(--color-signal-violet)",
+  ink: "var(--color-inkstone)",
+  slate: "var(--color-slate)",
+  smoke: "var(--color-smoke)",
+  ash: "var(--color-ash)",
+  mist: "var(--color-mist)",
+  cloud: "var(--color-cloud)",
+  /** The raised surface (white in light mode): marker centers, label backings. */
+  white: "var(--color-porcelain)",
 };
 
 /** Shared horizontal layout so the probability and payout charts line up bucket for bucket. */

@@ -12,6 +12,8 @@ import { short, signed, usd } from "@/lib/format";
 import { ReplayChart } from "@/components/charts/ReplayChart";
 import { FOCUS_PANEL, Panel, StepBadge } from "@/components/forecast/Panel";
 import { Tile } from "@/components/forecast/ProfitCard";
+import { PortfolioScreen } from "@/components/portfolio/PortfolioScreen";
+import { Segmented } from "@/components/ui/Segmented";
 
 /** Worked examples of the score, so the number on this page means something before you have one. */
 const EXAMPLES = [
@@ -38,8 +40,8 @@ function HowScored() {
         })}
       </ul>
       <p className="mt-3 text-[13px] leading-snug text-slate">
-        A positive average over many settled positions means your forecasts were better calibrated than the market&apos;s. Each score is written on-chain when the
-        position settles, so the record can&apos;t be edited or backdated.
+        A positive average over many settled positions means your forecasts were better calibrated than the market&apos;s. Each score is recorded when the position
+        settles; escrowed positions also write it on-chain, where it can&apos;t be edited or backdated.
       </p>
     </Panel>
   );
@@ -143,7 +145,7 @@ function RecordPageContent() {
       </div>
 
       <div className="grid items-start gap-2 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,0.8fr)]">
-        <Panel title="Positions" hint={owner ? "Everything you've opened, newest last. Open one for its payouts and on-chain history." : "Your positions will be listed here."}>
+        <Panel title="Positions" hint={owner ? "Everything you've opened, newest first. Open one for its payouts and history." : "Your positions will be listed here."}>
           {!owner ? (
             <p className="rounded-[16px] bg-porcelain px-4 py-3 text-[14px] text-slate">Connect a wallet to see your positions.</p>
           ) : !data?.positions.length ? (
@@ -198,11 +200,34 @@ function RecordPageContent() {
   );
 }
 
-/** The page, animated in and out on navigation. */
+type View = "portfolio" | "forecasts";
+const VIEWS: { value: View; label: string }[] = [
+  { value: "portfolio", label: "Portfolio" },
+  { value: "forecasts", label: "Forecast record" },
+];
+
+/**
+ * The Record tab: what you hold (the paper portfolio, valued live) and how your forecasts scored.
+ * ?view=forecasts opens the forecast record; the portfolio is the default.
+ */
 export default function RecordPage() {
+  const [view, setView] = useState<View>("portfolio");
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("view") === "forecasts") setView("forecasts");
+  }, []);
+  const pick = (v: View) => {
+    setView(v);
+    const url = new URL(window.location.href);
+    if (v === "forecasts") url.searchParams.set("view", v);
+    else url.searchParams.delete("view");
+    window.history.replaceState(null, "", url);
+  };
   return (
     <PageTransition>
-      <RecordPageContent />
+      <div className="mx-auto w-full max-w-[1680px] px-4 pt-5 md:px-6">
+        <Segmented options={VIEWS} value={view} onChange={pick} label="Record" />
+      </div>
+      {view === "portfolio" ? <PortfolioScreen embedded /> : <RecordPageContent />}
     </PageTransition>
   );
 }

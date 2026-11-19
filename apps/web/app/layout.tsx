@@ -4,6 +4,7 @@ import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { Nav } from "@/components/Nav";
 import { Footer } from "@/components/Footer";
+import { THEME_SCRIPT } from "@/components/ThemeToggle";
 
 const inter = Inter({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-inter", display: "swap" });
 
@@ -14,7 +15,11 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: Readonly<{ children: React.ReactNode }>) {
   return (
-    <html lang="en" className={inter.variable}>
+    // The theme script sets data-theme on <html> before React runs, so its attribute differs by design.
+    <html lang="en" className={inter.variable} suppressHydrationWarning>
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: THEME_SCRIPT }} />
+      </head>
       <body className="min-h-dvh flex flex-col">
         <Providers>
           <Nav />

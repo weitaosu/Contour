@@ -66,14 +66,14 @@ export interface Comparison {
 
 export interface Quote {
   legs: Leg[];
-  /** Stake left as cash in escrow: stake − Σ leg.usd − feesUsd, exact to the base unit. */
+  /** Stake not spent on contracts or fees: stake − Σ leg.usd − feesUsd, exact to the base unit. It comes back in every outcome, so it stays in the wallet (see escrowTerms). */
   cashUsd: number;
   /** Total Gemini trading fees across all legs (already taken out of the payout schedule). */
   feesUsd: number;
   /** Fee rate the quote was priced with (Gemini taker rate unless overridden). */
   feeRate: number;
   payoutByBucket: number[]; // USD, final, after post-processing
-  scheduleBase: number[]; // USDC base units (6 dp), the on-chain schedule
+  scheduleBase: number[]; // USDC base units (6 dp), cash included; escrowTerms gives the on-chain schedule
   stakeBase: number;
   minPayout: number;
   maxPayout: number;

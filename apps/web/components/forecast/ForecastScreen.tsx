@@ -4,6 +4,7 @@ import { useCallback, useDeferredValue, useEffect, useMemo, useRef, useState, Vi
 import { useQuery } from "@tanstack/react-query";
 import {
   compile,
+  escrowTerms,
   formatValue,
   fromBars,
   isTradable,
@@ -28,11 +29,11 @@ import {
 import { ArrowRight, Pencil } from "lucide-react";
 import { desk, type StoredQuote } from "@/lib/desk";
 import { useChainConfig } from "@/lib/chain";
-import { pct, settleLabel, untilLabel, usd } from "@/lib/format";
+import { notableUnused, pct, settleLabel, untilLabel, usd } from "@/lib/format";
 import { isWin, runs, whenPhrase } from "@/lib/outcomes";
 import { ProbabilityChart } from "@/components/charts/ProbabilityChart";
 import { Slider } from "@/components/ui/Slider";
-import { EvNote, KeyNumbers, MoneySplit, ProfitSummary, type SummaryStatus } from "./ProfitCard";
+import { Expectation, KeyNumbers, ProfitSummary, type SummaryStatus } from "./ProfitCard";
 import { ProtectCard, ProtectControls, ProtectNotes } from "./ProtectCard";
 import { MORE_STRATEGIES, MORE_STRATEGIES_ENABLED, type StrategyKey } from "./strategies";
 import { CompareMini } from "./ComparisonCard";
@@ -52,16 +53,17 @@ const CLOSE_BUFFER_MS = 10 * 60_000;
 
 type ShownQuote = Omit<Quote, "raw"> & { iterations?: number };
 
-// Confidence is a four-step dial. 0 is left out: with no trust in your own forecast there is nothing to trade.
-// Confidence = the weight the user's view gets when blended with the market's (see ConfidenceDialog).
+// "How closely should we follow your view?": the weight the user's view gets when blended with the market's (see
+// ConfidenceDialog). It starts at 100%, the position that matches the view as closely as the prices
+// allow; less sure leans on the market's odds, which puts less in, so a wrong call costs less.
 // Three quick levels plus "Other" for any weight; below half rarely clears fees, so it isn't a preset.
-const CONFIDENCE_LEVELS = [0.5, 0.75, 1] as const;
-const CONFIDENCE_NAMES = ["half and half", "mostly my forecast", "only my forecast"] as const;
-const DEFAULT_CONFIDENCE = 0.5;
+const CONFIDENCE_LEVELS = [1, 0.75, 0.5] as const;
+const CONFIDENCE_NAMES = ["full match", "a little safer", "much safer"] as const;
+const DEFAULT_CONFIDENCE = 1;
 const presetIndex = (c: number) => CONFIDENCE_LEVELS.findIndex((l) => Math.abs(l - c) < 1e-9);
 const confidenceName = (c: number) => {
   const i = presetIndex(c);
-  return i >= 0 ? CONFIDENCE_NAMES[i] : c < 0.5 ? "custom · leaning on the market" : "custom";
+  return i >= 0 ? CONFIDENCE_NAMES[i] : c < 0.5 ? "custom · very safe" : "custom · safer";
 };
 
 export interface Preset { c?: number; w?: number; x?: number; s?: number }
@@ -145,7 +147,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
   // only buys ranges (see PositionShape). Fine-tuning its bell keeps that; drawing by hand drops it.
   const [nearPicked, setNearPicked] = useState(false);
   // How far the picked outlook departs from the market (1 = the tile's preset). A pick starts at the
-  // gentlest strength, and lowest confidence, whose position actually trades (see outlookStart).
+  // gentlest strength whose position trades at the current setting (see outlookStart).
   const [strength, setStrength] = useState(1);
   // Big move: how far each hump sits from the center, in market standard deviations.
   const [splitOffset, setSplitOffset] = useState(SPLIT_OFFSET);
@@ -247,8 +249,8 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
     // Re-read the live price at the moment of the pick, so the view starts from exactly what's shown.
     const at = spot?.price ?? base;
     if (spot) setAnchor(spot.price);
-    // Start where the position trades: raise confidence first, then strengthen the view.
-    const start = ordered ? outlookStart(ladder, k, { anchor: at, stakeUsd: Math.max(1, stake) }) : null;
+    // Start at the gentlest strength that trades at the current setting (a full match unless lowered).
+    const start = ordered ? outlookStart(ladder, k, { anchor: at, stakeUsd: Math.max(1, stake), confidence }) : null;
     const s = start?.strength ?? 1;
     const o = outlookParams(k, s);
     setStrength(s);
@@ -256,7 +258,6 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
     setScale(o.w);
     setSplit(o.split !== null);
     setSplitOffset(o.split ?? SPLIT_OFFSET);
-    if (start) setConfidence(start.confidence);
     setNearPicked(k === "near");
     setEdit(false);
     setDraft(null);
@@ -430,6 +431,9 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
   // Every number on screen comes from the displayed quote (the desk's when fresh, else the preview),
   // so live price moves between the two can never leave the card, panel and review disagreeing.
   const payStake = protecting ? shown.stakeBase / 1e6 : stake;
+  // The quote's unused part would come back in every outcome, so it's never charged: you pay only
+  // what's at risk, and each payout from the escrow is lower by the same amount.
+  const kept = protecting ? 0 : escrowTerms(shown).keptBase / 1e6;
   // With a cap: what comes back if the price ends below it (and above the floor), from the shown quote.
   const shownBack = useMemo(() => {
     const p = protectQuote?.protection;
@@ -440,11 +444,11 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
     });
     return j >= 0 ? shown.payoutByBucket[j] : null;
   }, [protectQuote, shown]);
-  // When the view is too weak to trade, the lowest confidence level that would make it tradable.
+  // When the view is too weak to trade, the least the view must be followed for it to trade.
   // Up to two extra cold solves, so it waits until a drag is released.
   const raiseTo = useMemo(() => {
     if (dragging || protecting || spreading || !noEdge || !started) return null;
-    for (const c of CONFIDENCE_LEVELS) {
+    for (const c of [...CONFIDENCE_LEVELS].reverse()) {
       if (c <= confidence) continue;
       if (compile({ ladder, belief: solveBelief, confidence: c, stakeUsd: Math.max(1, stake), maxIter: 8_000, shape }).advice === "trade") return c;
     }
@@ -464,9 +468,9 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
       detail:
         raiseTo !== null ? (
           <span className="flex flex-wrap items-center gap-x-3 gap-y-1">
-            <span>It becomes a trade if you trust your view {pct(raiseTo)}.</span>
+            <span>It becomes a trade if Contour follows your view {pct(raiseTo)}.</span>
             <button type="button" className="ease rounded-full font-bold text-signal-violet underline decoration-2 underline-offset-4 hover:text-inkstone" onClick={raiseConfidence}>
-              Use {pct(raiseTo)} confidence
+              Follow it {pct(raiseTo)}
             </button>
           </span>
         ) : dragging ? (
@@ -572,13 +576,6 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
         : null,
     [spotPrice, ladder.kind],
   );
-  // "Where your money goes": where the contracts pay, and how likely that is by the market's odds.
-  const detailsMoney = useMemo(() => {
-    if (protecting) return null;
-    const w = display.payoutByBucket.map((p) => isWin(p, payStake));
-    const z = runs(w, (x) => x);
-    return { winsWhere: z.length ? whenPhrase(ladder, z) : null, chance: ladder.marketProb.reduce((acc, p, j) => acc + (w[j] ? p : 0), 0) };
-  }, [protecting, display, payStake, ladder]);
   const crossedStrikes = serverFresh?.data.crossedStrikes;
   const crossed = useMemo(() => crossedStrikes ?? ladder.instruments.filter((_, i) => ladder.crossed[i]).map((i) => i.label), [crossedStrikes, ladder]);
   const asOf = displayAt ? new Date(displayAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", second: "2-digit" }) : null;
@@ -659,10 +656,9 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
   // The details, each in its own compact panel, always in full: nothing hides behind tabs or scrolling.
   const fade = `transition-opacity duration-300 ${tradable ? "" : "opacity-45"}`;
   const moneyPanel =
-    !protecting && detailsMoney ? (
-      <Panel id="money" title={`Where your ${usd(stake, 0)} goes`} className="max-lg:order-6" bodyClassName={`gap-2 ${fade}`}>
-        <MoneySplit quote={display} stake={stake} winsWhere={detailsMoney.winsWhere} chance={detailsMoney.chance} bare compact />
-        <EvNote quote={display} stake={stake} compact />
+    !protecting ? (
+      <Panel id="money" title="What to expect" className="max-lg:order-6" bodyClassName={fade}>
+        <Expectation quote={display} stake={stake} used={stake - kept} hasView={!spreading} confidence={spreading ? null : confidence} />
       </Panel>
     ) : null;
   const comparing = !protecting && !summaryStatus && hasPosition && !!display.comparison;
@@ -691,19 +687,19 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
   return (
     <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-2 px-4 pb-28 pt-2 md:px-6 lg:min-h-[calc(100dvh-73px)] lg:pb-3">
       {/* Phone order bar: always one tap from the next step, like a brokerage app's trade button. */}
-      <div className="fixed inset-x-3 bottom-3 z-20 flex items-center justify-between gap-3 rounded-full bg-inkstone py-2 pl-5 pr-2 text-porcelain shadow-xl lg:hidden">
+      <div className="fixed inset-x-3 bottom-3 z-20 flex items-center justify-between gap-3 on-night rounded-full bg-night py-2 pl-5 pr-2 text-porcelain shadow-xl ring-1 ring-mist lg:hidden">
         {tradable ? (
           <>
             <span className="tnum min-w-0 text-[14px] leading-tight">
               <span className="block font-bold">
-                {covering ? `Covered call ${usd(payStake)}` : protecting ? `Protection ${usd(payStake + (fill?.delta ?? 0))}` : `You pay ${usd(stake, 0)}`}
+                {covering ? `Covered call ${usd(payStake)}` : protecting ? `Protection ${usd(payStake + (fill?.delta ?? 0))}` : `You pay ${usd(stake - kept, 0)}`}
               </span>
               <span className="block text-ash">
                 {covering && shownBack !== null
                   ? `earns ${usd(shownBack - payStake)} below ${fmt(cap)}`
                   : protecting
                     ? `pays up to ${usd(shown.maxPayout, 0)} below ${fmt(floor)}`
-                    : `get back ${usd(getBack.min, 0)}–${usd(getBack.max, 0)}`}
+                    : `get back ${usd(getBack.min - kept, 0)}–${usd(getBack.max - kept, 0)}`}
               </span>
             </span>
             <button type="button" className="btn btn-primary shrink-0 !px-5 !py-2.5" onClick={openReview}>
@@ -932,7 +928,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                   ladder={ladder}
                   quote={display}
                   stake={stake}
-                  hasView={!spreading}
+                  hasView={!spreading && confidence < 1}
                   note={spreading && spreadText ? `This spread pays ${spreadText}.` : undefined}
                   hover={hover}
                   onHover={setHover}
@@ -1111,14 +1107,16 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                 <dl className="grid grid-cols-[1fr_auto] gap-y-1.5 text-[14px]">
                   {/* The four numbers a newcomer needs; contract costs and fees are one tab away in Details. */}
                   <dt className="text-slate">You pay</dt>
-                  <dd className="tnum text-right font-bold text-inkstone">{usd(stake)}</dd>
+                  <dd className="text-right font-bold text-inkstone">
+                    <TickNumber value={stake - kept} text={usd(stake - kept)} />
+                  </dd>
                   <dt className="text-slate">Really at risk</dt>
                   <dd className="text-right font-bold text-inkstone">
                     <TickNumber value={stake - getBack.min} text={usd(stake - getBack.min)} />
                   </dd>
                   <dt className="text-slate">You get back</dt>
                   <dd className="text-right font-bold text-inkstone">
-                    <TickNumber value={getBack.min + getBack.max} text={`${usd(getBack.min, 0)} – ${usd(getBack.max, 0)}`} />
+                    <TickNumber value={getBack.min + getBack.max} text={`${usd(getBack.min - kept, 0)} – ${usd(getBack.max - kept, 0)}`} />
                   </dd>
                   <dt className="text-slate">Chance of profit</dt>
                   <dd className="tnum text-right font-bold text-inkstone">{pct(chanceMkt)}</dd>
@@ -1127,6 +1125,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                   {fill && <LiveDot />}
                   <span>
                     Includes {usd(shown.feesUsd)} in Gemini fees
+                    {notableUnused(kept) ? ` · ${usd(kept)} of your ${usd(stake, 0)} isn't needed` : ""}
                     {fill
                       ? Math.abs(fill.delta) >= 0.01
                         ? ` · ${fill.delta > 0 ? "▲" : "▼"} ${usd(Math.abs(fill.delta))} since the chart was drawn`
@@ -1216,9 +1215,12 @@ function ConfidencePicker({ value, onChange, onOther }: { value: number; onChang
     <div className="flex flex-col gap-2.5">
       <div>
         <span className="font-bold text-inkstone" id="confidence-label">
-          How much do you trust your view?
+          Follow your view
         </span>
-        <p className="text-[13px] leading-snug text-slate">How much your view counts against the market&apos;s. Higher bets more, and loses more if you&apos;re wrong.</p>
+        <p className="text-[13px] leading-snug text-slate">
+          At 100%, Contour builds the closest match to your view that Gemini&apos;s prices allow. Not sure? Lower it: Contour leans on the market&apos;s odds and
+          puts in less, so being wrong costs less.
+        </p>
       </div>
       <div
         role="radiogroup"
@@ -1245,7 +1247,7 @@ function ConfidencePicker({ value, onChange, onOther }: { value: number; onChang
               type="button"
               role="radio"
               aria-checked={on}
-              aria-label={`${Math.round(level * 100)} percent, ${CONFIDENCE_NAMES[i]}`}
+              aria-label={`Follow your view ${Math.round(level * 100)} percent, ${CONFIDENCE_NAMES[i]}`}
               tabIndex={on ? 0 : -1}
               onClick={() => onChange(level)}
               className={segClass(on)}
@@ -1262,7 +1264,7 @@ function ConfidencePicker({ value, onChange, onOther }: { value: number; onChang
           role="radio"
           aria-checked={custom}
           aria-haspopup="dialog"
-          aria-label={custom ? `Other, ${Math.round(value * 100)} percent. Change` : "Other: set your own confidence"}
+          aria-label={custom ? `Other, follow your view ${Math.round(value * 100)} percent. Change` : "Other: choose how closely to follow your view"}
           tabIndex={custom ? 0 : -1}
           onClick={onOther}
           className={segClass(custom)}
@@ -1271,9 +1273,9 @@ function ConfidencePicker({ value, onChange, onOther }: { value: number; onChang
         </button>
       </div>
       <div className="flex justify-between gap-2 text-[13px] text-smoke">
-        <span>Trust the market</span>
-        <span className="text-slate">{confidenceName(value)}</span>
-        <span>Trust my forecast</span>
+        <span>Full match</span>
+        <span className="text-slate">{value < 1 ? confidenceName(value) : ""}</span>
+        <span>Safer</span>
       </div>
     </div>
   );

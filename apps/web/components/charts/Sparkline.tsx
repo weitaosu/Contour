@@ -19,8 +19,8 @@ export function Sparkline({ values, height = 56 }: { values: number[]; height?: 
     <div ref={ref} className="w-full" style={{ height }} aria-hidden="true">
       {width > 0 && (
         <svg width={w} height={height} className="overflow-visible">
-          <path d={a} fill={COLORS.mist} className="ease group-hover:fill-[#e4e2fd]" />
-          <path d={l} fill="none" stroke={COLORS.smoke} strokeWidth={1.5} className="ease group-hover:stroke-[#594ff4]" />
+          <path d={a} fill={COLORS.mist} className="ease group-hover:fill-signal-violet/15" />
+          <path d={l} fill="none" stroke={COLORS.smoke} strokeWidth={1.5} className="ease group-hover:stroke-signal-violet" />
         </svg>
       )}
     </div>

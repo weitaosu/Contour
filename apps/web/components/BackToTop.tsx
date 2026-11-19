@@ -2,10 +2,11 @@
 
 import { useEffect, useState } from "react";
 import { ArrowUp } from "lucide-react";
+import { smoothScrollTo } from "@/lib/scroll";
 
 /**
  * A "back to top" pill for long pages: it fades in once you're about a screen and a half down and
- * takes you back up smoothly (instantly for reduced-motion users).
+ * takes you back up smoothly (see smoothScrollTo; instant for reduced-motion users).
  */
 export function BackToTop() {
   const [shown, setShown] = useState(false);
@@ -15,10 +16,7 @@ export function BackToTop() {
     window.addEventListener("scroll", onScroll, { passive: true });
     return () => window.removeEventListener("scroll", onScroll);
   }, []);
-  const toTop = () => {
-    const reduce = window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
-    window.scrollTo({ top: 0, behavior: reduce ? "auto" : "smooth" });
-  };
+  const toTop = () => smoothScrollTo(0);
   return (
     <button
       type="button"

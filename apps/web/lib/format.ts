@@ -31,3 +31,6 @@ export function settleShort(iso: string) {
   const time = d.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", timeZone: "America/New_York" });
   return `${day} ${time} ET`;
 }
+
+/** Whether part of the amount left unused is worth mentioning (cent leftovers from rounding aren't). */
+export const notableUnused = (usdAmount: number) => usdAmount >= 0.5;

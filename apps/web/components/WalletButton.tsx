@@ -2,11 +2,13 @@
 
 import { useWallet } from "@solana/wallet-adapter-react";
 import { WalletReadyState } from "@solana/wallet-adapter-base";
-import { Dialog } from "radix-ui";
-import { X } from "lucide-react";
+import { Dialog, Popover } from "radix-ui";
+import { ArrowUpRight, Check, ChevronRight, Copy, LogOut, X } from "lucide-react";
+import Link from "next/link";
 import { useEffect, useState } from "react";
-import { short } from "@/lib/format";
-import { env, network, networkLabel } from "@/lib/env";
+import { short, usd } from "@/lib/format";
+import { env, explorerAccountNetwork, explorerAddr, network, networkLabel } from "@/lib/env";
+import { useUsdcBalance, useUsdcMint } from "@/lib/chain";
 
 export function useConnectDialog() {
   const [open, setOpen] = useState(false);
@@ -31,7 +33,7 @@ export function WalletDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   return (
     <Dialog.Root open={open} onOpenChange={onOpenChange}>
       <Dialog.Portal>
-        <Dialog.Overlay className="fixed inset-0 z-40 bg-inkstone/40" />
+        <Dialog.Overlay className="fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]" />
         <Dialog.Content className="fixed left-1/2 top-1/2 z-50 w-[min(440px,calc(100vw-32px))] -translate-x-1/2 -translate-y-1/2 rounded-[36px] border border-mist bg-porcelain p-8">
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -89,18 +91,12 @@ export function WalletDialog({ open, onOpenChange }: { open: boolean; onOpenChan
 }
 
 export function WalletButton() {
-  const { publicKey, disconnect } = useWallet();
+  const { publicKey } = useWallet();
   const { open, setOpen } = useConnectDialog();
   const [mounted, setMounted] = useState(false);
   useEffect(() => setMounted(true), []);
   if (!mounted) return <span className="btn btn-primary opacity-0">Connect wallet</span>;
-  if (publicKey) {
-    return (
-      <button className="btn btn-ghost tnum" onClick={() => disconnect()} title="Disconnect">
-        {short(publicKey.toBase58())}
-      </button>
-    );
-  }
+  if (publicKey) return <WalletMenu address={publicKey.toBase58()} />;
   return (
     <>
       <button className="btn btn-primary !px-5 sm:!px-7" onClick={() => setOpen(true)}>
@@ -110,5 +106,92 @@ export function WalletButton() {
       </button>
       <WalletDialog open={open} onOpenChange={setOpen} />
     </>
+  );
+}
+
+/** The connected wallet: the full address (copyable), its test USDC, the record, and log out. */
+function WalletMenu({ address }: { address: string }) {
+  const { wallet, publicKey, disconnect } = useWallet();
+  const mint = useUsdcMint();
+  const bal = useUsdcBalance(publicKey, mint);
+  const [open, setOpen] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const copy = async () => {
+    try {
+      await navigator.clipboard.writeText(address);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      /* clipboard blocked: the address is selectable text */
+    }
+  };
+  return (
+    <Popover.Root open={open} onOpenChange={setOpen}>
+      <Popover.Trigger className="btn btn-ghost tnum" aria-label={`Wallet ${address}. Open wallet menu`}>
+        {short(address)}
+      </Popover.Trigger>
+      <Popover.Portal>
+        <Popover.Content
+          align="end"
+          sideOffset={8}
+          collisionPadding={16}
+          className="fade-up z-50 w-[min(360px,calc(100vw-32px))] rounded-[24px] border border-mist bg-porcelain p-5 shadow-xl"
+        >
+          <div className="flex items-center gap-3">
+            {wallet?.adapter.icon && (
+              // eslint-disable-next-line @next/next/no-img-element
+              <img src={wallet.adapter.icon} alt="" width={28} height={28} className="rounded-lg" />
+            )}
+            <div className="min-w-0">
+              <p className="font-bold leading-tight text-inkstone">{wallet?.adapter.name ?? "Wallet"}</p>
+              <p className="text-[13px] text-smoke">Connected · {networkLabel}</p>
+            </div>
+          </div>
+
+          <p className="stat-label mt-4">Address</p>
+          <div className="mt-1.5 flex items-start gap-2 rounded-[16px] bg-cloud px-3.5 py-3">
+            <span className="tnum min-w-0 flex-1 select-all break-all font-mono text-[13.5px] leading-snug text-inkstone">{address}</span>
+            <button
+              type="button"
+              onClick={copy}
+              className="shrink-0 rounded-full p-1.5 text-slate hover:bg-mist hover:text-inkstone"
+              aria-label={copied ? "Address copied" : "Copy address"}
+              title={copied ? "Copied" : "Copy address"}
+            >
+              {copied ? <Check size={16} strokeWidth={2.5} className="text-gain" /> : <Copy size={16} strokeWidth={2} />}
+            </button>
+          </div>
+
+          <div className="mt-3 flex items-center justify-between text-[14px]">
+            <span className="text-slate">Test USDC</span>
+            <span className="tnum font-bold text-inkstone">{bal.data !== undefined ? usd(bal.data) : "…"}</span>
+          </div>
+
+          <div className="mt-4 flex flex-col gap-1 border-t border-mist pt-3 text-[14px]">
+            <Link href="/me" onClick={() => setOpen(false)} className="flex items-center justify-between rounded-[12px] px-2 py-2 font-medium text-inkstone hover:bg-cloud">
+              My record <ChevronRight size={16} className="text-smoke" />
+            </Link>
+            <a
+              href={explorerAddr(address)}
+              target="_blank"
+              rel="noreferrer"
+              className="flex items-center justify-between rounded-[12px] px-2 py-2 font-medium text-inkstone hover:bg-cloud"
+            >
+              View on Solana Explorer · {explorerAccountNetwork} <ArrowUpRight size={15} className="text-smoke" />
+            </a>
+            <button
+              type="button"
+              onClick={() => {
+                setOpen(false);
+                disconnect();
+              }}
+              className="flex items-center gap-2 rounded-[12px] px-2 py-2 text-left font-bold text-inkstone hover:bg-cloud"
+            >
+              <LogOut size={16} strokeWidth={2} /> Log out
+            </button>
+          </div>
+        </Popover.Content>
+      </Popover.Portal>
+    </Popover.Root>
   );
 }

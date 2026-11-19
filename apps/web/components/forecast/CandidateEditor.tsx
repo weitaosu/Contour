@@ -198,7 +198,7 @@ export function CandidateEditor({
                     aria-hidden="true"
                   />
                   <span
-                    className="ease absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-signal-violet bg-white opacity-0 shadow-sm group-hover:opacity-100 group-focus-visible:opacity-100"
+                    className="ease absolute top-1/2 h-4 w-4 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-signal-violet bg-porcelain opacity-0 shadow-sm group-hover:opacity-100 group-focus-visible:opacity-100"
                     style={{ left: `${(belief[i] / scale) * 100}%`, transition: "left 160ms cubic-bezier(.2,.8,.2,1), opacity 180ms ease" }}
                     aria-hidden="true"
                   />
@@ -207,7 +207,7 @@ export function CandidateEditor({
                   {TAKE_STEPS.map((s) => {
                     const Icon = ICONS[s.level];
                     const active = level === s.level;
-                    const tone = active ? (s.level > 0 ? "bg-signal-violet text-white" : s.level < 0 ? "bg-inkstone text-white" : "bg-porcelain text-inkstone shadow-sm") : "text-slate hover:bg-porcelain hover:text-inkstone";
+                    const tone = active ? (s.level > 0 ? "bg-signal-violet text-white" : s.level < 0 ? "bg-inkstone text-porcelain" : "bg-porcelain text-inkstone shadow-sm") : "text-slate hover:bg-porcelain hover:text-inkstone";
                     return (
                       <button
                         key={s.level}

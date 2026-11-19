@@ -11,8 +11,8 @@ import { useMorph } from "./useTween";
 const WAVE_IN = 360;
 const WAVE = 180;
 
-export const GAIN = "#1aab8b";
-const GAIN_DEEP = "#12846a";
+export const GAIN = "var(--color-gain)";
+const GAIN_DEEP = "var(--color-gain-deep)";
 
 export interface ProfitChartProps {
   /** Profit (+) or loss (−) in USD per outcome, relative to the stake. */

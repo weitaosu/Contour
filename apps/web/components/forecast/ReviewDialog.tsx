@@ -4,15 +4,19 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAnchorWallet, useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Transaction } from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
+import { createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from "@solana/spl-token";
+import { ata } from "@contour/chain";
 import { Dialog } from "radix-ui";
 import { Check, X } from "lucide-react";
-import type { Ladder, Quote } from "@contour/core";
+import { escrowTerms, type Ladder, type Quote } from "@contour/core";
 import { desk, type StoredQuote } from "@/lib/desk";
 import { openPositionIx, sendTx, useChainConfig, useDeskConfig, useProgram, useUsdcBalance, useUsdcMint } from "@/lib/chain";
-import { pct, settleLabel, usd } from "@/lib/format";
+import { notableUnused, pct, settleLabel, short, usd } from "@/lib/format";
+import { explorerTx } from "@/lib/env";
 import { isWin, runs, whenPhrase } from "@/lib/outcomes";
 import { WalletDialog } from "@/components/WalletButton";
+import { usePortfolio } from "@/lib/paper";
 
 const dollars = (n: number) => usd(n, Math.abs(n) >= 100 ? 0 : 2);
 
@@ -56,6 +60,15 @@ export function ReviewDialog({
   const zones = runs(wins, (w) => w);
   const chance = ladder.marketProb.reduce((s, p, j) => s + (wins[j] ? p : 0), 0);
   const [ack, setAck] = useState(false);
+  // Direct-payment mode: the USDC goes straight to this wallet instead of an escrow.
+  const payTo = useDeskConfig().data?.payTo ?? null;
+  // No wallet connected: the trade goes into the paper portfolio instead.
+  const { publicKey: walletKey } = useWallet();
+  // Only what's at risk is escrowed: the quote's unused part is never charged, and every payout drops
+  // by the same amount, so profit and loss are unchanged. The desk's quote is what gets signed.
+  const kept = (server ? Number(server.keptBaseUnits ?? 0) : escrowTerms(quote).keptBase) / 1e6;
+  const pay = server ? Number(server.stakeBaseUnits) / 1e6 : stake - kept;
+  const keeps = notableUnused(kept);
 
   return (
     <Dialog.Root
@@ -66,7 +79,7 @@ export function ReviewDialog({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="fade-in fixed inset-0 z-40 bg-inkstone/40" />
+        <Dialog.Overlay className="fade-in fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]" />
         <Dialog.Content className="fade-up fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto rounded-t-[32px] bg-porcelain px-6 pb-8 pt-6 md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:w-[min(560px,calc(100vw-32px))] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[36px] md:p-8">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
@@ -87,7 +100,7 @@ export function ReviewDialog({
                 You make money <span className="text-signal-violet">{whenPhrase(ladder, zones)}</span>.
               </>
             ) : (
-              <>At this confidence your money barely moves.</>
+              <>At this setting your money barely moves.</>
             )}
           </Dialog.Description>
 
@@ -101,17 +114,32 @@ export function ReviewDialog({
                 </span>
               ))}
             />
-            {confidence !== null && <Row label="Confidence" value={pct(confidence)} />}
-            <Row label="You pay" value={usd(stake)} strong />
+            {confidence !== null && <Row label="Follows your view" value={confidence >= 1 ? "100% · full match" : `${pct(confidence)} · safer`} />}
             <Row
-              label="What it buys"
+              label="You pay"
               value={
                 <>
-                  {usd(quote.legs.reduce((a, l) => a + l.usd, 0))} of contracts <span className="text-slate">· {usd(quote.cashUsd)} kept as cash</span>
+                  {usd(pay)}
+                  {keeps && <span className="font-normal text-slate"> · of your {usd(stake)}</span>}
                 </>
               }
+              strong
             />
+            <Row label="What it buys" value={<>{usd(quote.legs.reduce((a, l) => a + l.usd, 0))} of contracts</>} />
             <Row label="Gemini fees" value={<>{usd(quote.feesUsd)} <span className="text-slate">· included above</span></>} />
+            {keeps && (
+              <Row
+                label="Not needed"
+                value={
+                  <>
+                    {usd(kept)}{" "}
+                    <span className="text-slate">
+                      · {confidence !== null && confidence < 1 ? `following your view at ${pct(confidence)} puts in less` : "the closest match to your view uses less"}
+                    </span>
+                  </>
+                }
+              />
+            )}
             {protection ? (
               <>
                 {protection.floor && (
@@ -156,7 +184,7 @@ export function ReviewDialog({
                   value={
                     <>
                       <span className="font-bold text-gain">+{dollars(quote.maxPayout - stake)}</span>{" "}
-                      <span className="text-slate">· you get {usd(quote.maxPayout)}</span>
+                      <span className="text-slate">· {usd(quote.maxPayout - kept)} paid out</span>
                     </>
                   }
                 />
@@ -164,7 +192,7 @@ export function ReviewDialog({
                   label="Worst case"
                   value={
                     <>
-                      <span className="font-bold">−{dollars(stake - quote.minPayout)}</span> <span className="text-slate">· you keep {usd(quote.minPayout)}</span>
+                      <span className="font-bold">−{dollars(stake - quote.minPayout)}</span> <span className="text-slate">· {usd(quote.minPayout - kept)} paid back</span>
                     </>
                   }
                 />
@@ -175,14 +203,35 @@ export function ReviewDialog({
 
           <div className="mt-6 border-t border-mist pt-5">
             <p className="stat-label">When you confirm</p>
-            <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
-              <Step n={1}>Your wallet signs one transaction that locks {usd(stake)} and this exact payout schedule on Solana.</Step>
-              <Step n={2}>
-                The desk buys {quote.legs.length} {quote.legs.length === 1 ? "contract" : "contracts"} to back it. If it doesn&apos;t accept within minutes, you can cancel for a full
-                refund.
-              </Step>
-              <Step n={3}>When the market settles, you&apos;re paid by the schedule automatically. Nothing to sell, nothing to watch.</Step>
-            </ol>
+            {walletKey && payTo ? (
+              <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
+                <Step n={1}>
+                  Your wallet signs one transaction that sends {usd(pay)} USDC straight to Contour&apos;s account <span className="tnum font-bold">{short(payTo, 4)}</span>.
+                  {keeps && <> The other {usd(kept)} isn&apos;t used.</>}
+                </Step>
+              </ol>
+            ) : walletKey ? (
+              <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
+                <Step n={1}>
+                  Your wallet signs one transaction that locks {usd(pay)} and this exact payout schedule on Solana.
+                  {keeps && <> The other {usd(kept)} isn&apos;t used.</>}
+                </Step>
+                <Step n={2}>
+                  The desk buys {quote.legs.length} {quote.legs.length === 1 ? "contract" : "contracts"} to back it. If it doesn&apos;t accept within minutes, you can cancel for a full
+                  refund.
+                </Step>
+                <Step n={3}>When the market settles, you&apos;re paid by the schedule automatically. Nothing to sell, nothing to watch.</Step>
+              </ol>
+            ) : (
+              <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
+                <Step n={1}>
+                  {quote.legs.length} {quote.legs.length === 1 ? "contract fills" : "contracts fill"} at Gemini&apos;s live asks, about {usd(pay)} from your paper cash.
+                  {keeps && <> The other {usd(kept)} isn&apos;t needed, so it stays in your cash.</>}
+                </Step>
+                <Step n={2}>The position goes into your portfolio, under Record, valued at what it would sell for now. Buy more or sell any of it before it settles.</Step>
+                <Step n={3}>When the market settles, each winning contract pays $1 into your paper cash.</Step>
+              </ol>
+            )}
           </div>
 
           <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-[16px] border border-mist px-4 py-3 text-[15px] text-inkstone hover:border-ash">
@@ -203,13 +252,14 @@ export function ReviewDialog({
                 </>
               ) : (
                 <>
-                  I understand I could get back as little as <b className="tnum">{usd(quote.minPayout)}</b> of my {usd(stake)}.
+                  I understand I could lose up to <b className="tnum">{usd(stake - quote.minPayout)}</b>
+                  {stake - quote.minPayout < pay - 0.005 ? <>, getting back as little as {usd(quote.minPayout - kept)} of the {usd(pay)} I pay</> : <>, everything I pay</>}.
                 </>
               )}
             </span>
           </label>
 
-          <ConfirmBlock ladder={ladder} server={server} stake={stake} quoteErr={quoteErr} age={age} ack={ack} />
+          <ConfirmBlock ladder={ladder} server={server} stake={pay} payTo={payTo} quoteErr={quoteErr} age={age} ack={ack} viewLabel={viewLabel} />
           <Dialog.Close className="btn btn-quiet btn-block mt-3">Back to edit</Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>
@@ -246,7 +296,118 @@ function paymentError(e: Error): string {
   return `The payment didn't go through: ${m.slice(0, 200)}`;
 }
 
-function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: Ladder; server: StoredQuote | null; stake: number; quoteErr: string | null; age: number | null; ack: boolean }) {
+function ConfirmBlock({
+  ladder,
+  server,
+  stake,
+  payTo,
+  quoteErr,
+  age,
+  ack,
+  viewLabel,
+}: {
+  ladder: Ladder;
+  server: StoredQuote | null;
+  stake: number;
+  /** Demo direct-payment mode: send the USDC straight to this wallet instead of opening an escrow. */
+  payTo: string | null;
+  quoteErr: string | null;
+  age: number | null;
+  ack: boolean;
+  viewLabel: string;
+}) {
+  const { publicKey } = useWallet();
+  // No wallet: the trade goes into this browser's paper portfolio, filled at Gemini's live prices.
+  if (!publicKey) return <PaperConfirm ladder={ladder} server={server} stake={stake} quoteErr={quoteErr} age={age} ack={ack} viewLabel={viewLabel} />;
+  return <WalletConfirm ladder={ladder} server={server} stake={stake} payTo={payTo} quoteErr={quoteErr} age={age} ack={ack} />;
+}
+
+/** The paper stand-in for signing: fill the reviewed desk quote into the paper portfolio and open the position. */
+function PaperConfirm({
+  ladder,
+  server,
+  stake,
+  quoteErr,
+  age,
+  ack,
+  viewLabel,
+}: {
+  ladder: Ladder;
+  server: StoredQuote | null;
+  stake: number;
+  quoteErr: string | null;
+  age: number | null;
+  ack: boolean;
+  viewLabel: string;
+}) {
+  const router = useRouter();
+  const qc = useQueryClient();
+  const { account, data: portfolio } = usePortfolio();
+  const [dialog, setDialog] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const cash = portfolio?.totals.cashUsd;
+  const short = cash !== undefined && cash < stake;
+
+  async function place() {
+    if (!account || !server) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const pos = await desk.paperOpen(account, { quoteId: server.quoteId, label: viewLabel });
+      await qc.invalidateQueries({ queryKey: ["paper", account] });
+      router.push(`/portfolio/${pos.id}?opened=1`);
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  const label = busy ? "Placing your trade…" : !server ? "Waiting for desk quote…" : short ? "Not enough paper cash" : `Place paper trade · ${usd(stake)}`;
+  return (
+    <div className="mt-5 flex flex-col gap-3">
+      <button className="btn btn-primary btn-block" disabled={busy || !server || !ack || !account || short} onClick={place}>
+        {label}
+      </button>
+      <p className="text-[14px] text-smoke">
+        {quoteErr
+          ? `Desk quote failed: ${quoteErr}`
+          : server
+            ? `Desk quote · ${age}s ago · fills at Gemini's live asks, within 1¢ of this quote`
+            : "Preview computed in your browser; desk quote pending."}
+        {cash !== undefined ? ` · Paper cash ${usd(cash)}` : ""}
+        {` · Settles ${settleLabel(ladder.expiry)}`}
+      </p>
+      {err && <p className="rounded-2xl bg-porcelain px-4 py-3 text-[14px] text-inkstone">{err}</p>}
+      <p className="text-[13px] text-smoke">
+        Paper trading: no real money moves, and positions live in this browser&apos;s portfolio.{" "}
+        <button type="button" className="font-bold text-signal-violet underline decoration-2 underline-offset-4 hover:text-inkstone" onClick={() => setDialog(true)}>
+          Connect a wallet
+        </button>{" "}
+        to lock it on Solana instead.
+      </p>
+      <WalletDialog open={dialog} onOpenChange={setDialog} />
+    </div>
+  );
+}
+
+function WalletConfirm({
+  ladder,
+  server,
+  stake,
+  payTo,
+  quoteErr,
+  age,
+  ack,
+}: {
+  ladder: Ladder;
+  server: StoredQuote | null;
+  stake: number;
+  payTo: string | null;
+  quoteErr: string | null;
+  age: number | null;
+  ack: boolean;
+}) {
   const router = useRouter();
   const qc = useQueryClient();
   const { connection } = useConnection();
@@ -260,9 +421,12 @@ function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: L
   const [dialog, setDialog] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Set only if the payment went through but couldn't be saved as a position (shown instead of the button).
+  const [paid, setPaid] = useState<{ sig: string; amount: number; to: string; problem: string } | null>(null);
 
-  const deployed = !!chainCfg.data && !!mint;
-  const short = bal.data !== undefined && bal.data < stake;
+  // Direct payment needs only the USDC mint; the escrow flow also needs the program deployed.
+  const deployed = payTo ? !!mint : !!chainCfg.data && !!mint;
+  const lacking = bal.data !== undefined && bal.data < stake;
 
   async function faucet() {
     if (!publicKey) return;
@@ -274,6 +438,40 @@ function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: L
     } catch (e) {
       setErr((e as Error).message);
     } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Demo direct payment: one USDC transfer from the buyer straight to `payTo`. */
+  async function payDirect() {
+    if (!publicKey || !anchorWallet || !mint || !server || !payTo) return;
+    setErr(null);
+    try {
+      setBusy("Waiting for your signature…");
+      const to = new PublicKey(payTo);
+      const from = ata(mint, publicKey);
+      const dest = ata(mint, to);
+      const amount = BigInt(server.stakeBaseUnits);
+      const tx = new Transaction().add(
+        // Creates the receiving USDC account the first time (paid by the buyer); a no-op after that.
+        createAssociatedTokenAccountIdempotentInstruction(publicKey, dest, to, mint),
+        createTransferCheckedInstruction(from, mint, dest, publicKey, amount, 6),
+      );
+      setBusy(`Sending ${usd(Number(amount) / 1e6)} USDC…`);
+      const sig = await sendTx(connection, anchorWallet, tx);
+      await qc.invalidateQueries({ queryKey: ["usdc"] });
+      // Save it as a position (the desk checks the transfer on-chain), then open its page.
+      setBusy("Saving your position…");
+      try {
+        const { position } = await desk.recordPayment({ signature: sig, forecastHash: server.forecastHash, owner: publicKey.toBase58() });
+        await qc.invalidateQueries({ queryKey: ["record"] });
+        router.push(`/p/${position}`);
+      } catch (e) {
+        setPaid({ sig, amount: Number(amount) / 1e6, to: payTo, problem: (e as Error).message });
+        setBusy(null);
+      }
+    } catch (e) {
+      setErr(paymentError(e as Error));
       setBusy(null);
     }
   }
@@ -303,19 +501,19 @@ function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: L
     }
   }
 
-  let label = `Confirm and sign · ${usd(stake)}`;
-  let action: (() => void) | null = confirm;
+  let label = payTo ? `Confirm and pay · ${usd(stake)}` : `Confirm and sign · ${usd(stake)}`;
+  let action: (() => void) | null = payTo ? payDirect : confirm;
   let disabled = false;
   if (!publicKey) {
     label = "Connect wallet to confirm";
     action = () => setDialog(true);
   } else if (!deployed) {
-    label = "Escrow not deployed yet";
+    label = payTo ? "Test USDC not set up yet" : "Escrow not deployed yet";
     disabled = true;
-  } else if (cfg.data && !cfg.data.desk) {
+  } else if (!payTo && cfg.data && !cfg.data.desk) {
     label = "Desk is not connected to the chain";
     disabled = true;
-  } else if (short) {
+  } else if (lacking) {
     label = "Get test USDC";
     action = cfg.data?.faucetEnabled ? faucet : null;
     disabled = !cfg.data?.faucetEnabled;
@@ -330,6 +528,19 @@ function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: L
     disabled = true;
   }
 
+  if (paid)
+    return (
+      <div className="mt-5 flex flex-col gap-2 rounded-[20px] bg-cloud px-5 py-4 text-[15px] text-inkstone" role="status">
+        <p className="flex items-center gap-2 font-bold">
+          <Check size={18} strokeWidth={3} className="text-gain" aria-hidden="true" /> Paid {usd(paid.amount)} USDC to {short(paid.to, 4)}
+        </p>
+        <p className="text-[14px] text-slate">The transfer is confirmed on Solana, but the desk couldn&apos;t save it as a position: {paid.problem}</p>
+        <a className="link text-[14px] font-bold" href={explorerTx(paid.sig)} target="_blank" rel="noreferrer">
+          View the transaction · {short(paid.sig, 6)}
+        </a>
+      </div>
+    );
+
   return (
     <div className="mt-5 flex flex-col gap-3">
       <button className="btn btn-primary btn-block" disabled={disabled} onClick={() => action?.()}>
@@ -339,7 +550,7 @@ function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: L
         {quoteErr
           ? `Desk quote failed: ${quoteErr}`
           : server
-            ? `Desk quote · ${age}s ago · prices lock when you sign`
+            ? `Desk quote · ${age}s ago${payTo ? "" : " · prices lock when you sign"}`
             : "Preview computed in your browser; desk quote pending."}
         {publicKey && bal.data !== undefined ? ` · Balance ${usd(bal.data)}` : ""}
         {` · Expires ${settleLabel(ladder.expiry)}`}

@@ -341,7 +341,7 @@ function ProtectChart({
           {/* capped zone: gains given up between the cap and the top strike */}
           {capX !== null && topX !== null && (
             <>
-              <rect x={capX} y={pad.t} width={Math.max(0, topX - capX)} height={H - pad.t - pad.b} rx={10} fill="rgba(31,31,31,0.04)" />
+              <rect x={capX} y={pad.t} width={Math.max(0, topX - capX)} height={H - pad.t - pad.b} rx={10} fill="var(--color-inkstone)" fillOpacity={0.05} />
               <line x1={capX} x2={capX} y1={pad.t} y2={H - pad.b} stroke={COLORS.slate} strokeWidth={1.25} strokeDasharray="4 4" />
               <text x={capX + 6} y={pad.t + 12} fontSize={12} fontWeight={700} fill={COLORS.slate}>
                 Capped

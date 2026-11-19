@@ -10,7 +10,7 @@ export function Footer() {
   const cfg = useQuery({ queryKey: ["config"], queryFn: desk.config, staleTime: 60_000 });
   const programId = cfg.data?.programId ?? env.programId;
   return (
-    <footer className="mt-24 bg-inkstone text-porcelain">
+    <footer className="on-night mt-24 bg-night text-porcelain">
       <div className="page grid gap-10 py-16 md:grid-cols-[1.4fr_1fr_1fr]">
         <div>
           <div className="flex items-center gap-3">
@@ -18,8 +18,9 @@ export function Footer() {
             <span className="text-[20px] font-bold tracking-[0.04em]">Contour</span>
           </div>
           <p className="mt-5 max-w-md text-ash">
-            What is simulated: the escrow, deposits, collateral and payouts are real Solana devnet transactions with test USDC.
-            Hedge fills are simulated at live Gemini quotes (paper mode) and no order reaches Gemini.
+            {cfg.data?.payTo
+              ? "Demo payment mode: payments are real Solana transactions with test USDC, sent straight to Contour's account. Hedge fills are simulated at live Gemini quotes (paper mode) and no order reaches Gemini."
+              : "What is simulated: the escrow, deposits, collateral and payouts are real Solana devnet transactions with test USDC. Hedge fills are simulated at live Gemini quotes (paper mode) and no order reaches Gemini."}
           </p>
         </div>
         <div className="flex flex-col gap-2">

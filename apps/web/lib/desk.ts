@@ -50,8 +50,11 @@ export interface StoredQuote {
   title?: string;
   forecastHash: string;
   marketIdHex: string;
+  /** What goes on-chain: the escrowed stake and payouts, without the quote's cash. */
   scheduleBaseUnits: string[];
   stakeBaseUnits: string;
+  /** The quote's cash, which stays in the wallet (absent on quotes from before it stopped being escrowed). */
+  keptBaseUnits?: string;
   expiryTs: number;
   validUntil: number;
   capturedAt: string;
@@ -71,6 +74,124 @@ export interface LiveView {
   asks: { symbol: string; yesAsk: number | null; noAsk: number | null }[];
 }
 
+
+/** Paper trading (no wallet): one account per browser, positions filled at Gemini's live prices. */
+export type PaperStrategy = "view" | "near" | "spread" | "protect";
+export interface PaperRequest {
+  belief: number[];
+  confidence: number;
+  protect?: { units: number; floor?: number; cap?: number };
+  spread?: { direction: "up" | "down"; from: number; to: number };
+  shape?: "range";
+}
+export interface PaperPositionSummary {
+  id: string;
+  ticker: string;
+  title: string;
+  category: string | null;
+  strategy: PaperStrategy;
+  viewLabel: string | null;
+  status: "open" | "closed" | "settled";
+  awaiting: boolean;
+  expiry: string;
+  openedAt: number;
+  closedAt: number | null;
+  costUsd: number;
+  /** Market value at the mark: the midpoint of bid and ask (how brokerages value holdings). */
+  valueUsd: number;
+  /** Cash-out estimate: what selling it all now would fetch at the bids, after sell fees. */
+  cashOutUsd: number | null;
+  /** Gemini's buy fees inside costUsd. */
+  feesPaidUsd: number;
+  pricing: "live" | "frozen" | "none" | "final";
+  /** valueUsd − costUsd, which is moveUsd − entryCostUsd. */
+  unrealizedUsd: number;
+  /** What buying cost beyond the mark: fees, plus paying the ask instead of the midpoint. */
+  entryCostUsd: number;
+  /** How the mark has moved since buying: the part of the return that's the market. */
+  moveUsd: number;
+  realizedUsd: number;
+  schedule: number[];
+  payoutUsd: number | null;
+  outcomeLabel: string | null;
+  contracts: number;
+  investedUsd: number;
+  returnedUsd: number;
+  /** A demo position on a made-up past market (sample data). */
+  demo: boolean;
+  /** Closed and settled positions: how each contract ended, in short. */
+  results?: { label: string; side: "yes" | "no"; result: PaperContractResult["result"]; pnlUsd: number }[];
+}
+/** How one contract in a position ended: bought, then sold, settled, or a mix. */
+export interface PaperContractResult {
+  symbol: string;
+  side: "yes" | "no";
+  label: string;
+  qty: number;
+  avgPrice: number;
+  costUsd: number;
+  result: "won" | "lost" | "sold" | "mixed" | "open";
+  soldQty: number;
+  avgSellPrice: number | null;
+  settledQty: number;
+  won: boolean | null;
+  returnedUsd: number;
+  pnlUsd: number;
+}
+export interface PaperFill { symbol: string; side: "yes" | "no"; label: string; qty: number; price: number; feeUsd: number }
+export interface PaperTrade {
+  id: number;
+  position: string;
+  title: string;
+  kind: "open" | "add" | "sell" | "settle";
+  cashUsd: number;
+  realizedUsd: number;
+  fraction: number | null;
+  outcome: string | null;
+  fills: PaperFill[];
+  at: number;
+}
+export interface PaperMark { at: number; valueUsd: number }
+export interface PaperPortfolio {
+  account: string;
+  createdAt: number;
+  /** When a demo portfolio was added; its history before then, and demo positions, are sample data. */
+  demoAt: number | null;
+  totals: { cashUsd: number; positionsUsd: number; cashOutUsd: number; totalUsd: number; startUsd: number; unrealizedUsd: number; realizedUsd: number; openCount: number };
+  positions: PaperPositionSummary[];
+  history: PaperMark[];
+  trades: PaperTrade[];
+}
+export interface PaperLeg {
+  symbol: string;
+  side: "yes" | "no";
+  label: string;
+  strike: number | null;
+  qty: number;
+  avgPrice: number;
+  costUsd: number;
+  feesUsd: number;
+  bid: number | null;
+  ask: number | null;
+  mark: number | null;
+  valueUsd: number | null;
+  cashOutUsd: number | null;
+  pnlUsd: number | null;
+  pays: number[];
+}
+export interface PaperPositionDetail extends PaperPositionSummary {
+  request: PaperRequest;
+  ladder: { kind: Ladder["kind"]; bucketLabels: string[]; cutLabels: string[]; cuts: number[] | null; unit: Ladder["unit"]; symbols: string[]; marketProb: number[] };
+  cashInPositionUsd: number;
+  legs: PaperLeg[];
+  contractResults: PaperContractResult[];
+  history: PaperMark[];
+  trades: PaperTrade[];
+  accountCashUsd: number;
+  canBuyMore: boolean;
+  canSell: boolean;
+}
+
 export interface DeskConfig {
   executionMode: "paper" | "sandbox" | "live";
   programId: string | null;
@@ -79,6 +200,8 @@ export interface DeskConfig {
   faucetEnabled: boolean;
   /** Desk wallet; null when the desk has no chain keys and cannot accept positions. */
   desk: string | null;
+  /** Demo direct-payment mode: buyers send USDC straight to this wallet (no escrow). Null = escrow flow. */
+  payTo?: string | null;
 }
 
 async function j<T>(res: Response): Promise<T> {
@@ -102,6 +225,18 @@ export const desk = {
       j<{ ladder: Ladder; capturedAt: string; volume: number | null; frozen?: boolean; sample?: boolean }>(r),
     ),
   live: (ticker: string, signal?: AbortSignal) => fetch(`${env.deskUrl}/live/${encodeURIComponent(ticker)}`, { signal }).then((r) => j<LiveView>(r)),
+  paperPortfolio: (account: string) => fetch(`${env.deskUrl}/paper/${account}`).then((r) => j<PaperPortfolio>(r)),
+  paperReset: (account: string, demo: boolean) =>
+    fetch(`${env.deskUrl}/paper/${account}/reset`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ demo }) }).then((r) => j<PaperPortfolio>(r)),
+  paperPosition: (account: string, id: string) => fetch(`${env.deskUrl}/paper/${account}/positions/${id}`).then((r) => j<PaperPositionDetail>(r)),
+  paperOpen: (account: string, body: { quoteId: string; label?: string }) =>
+    fetch(`${env.deskUrl}/paper/${account}/positions`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<PaperPositionDetail>(r)),
+  paperAdd: (account: string, id: string, quoteId: string) =>
+    fetch(`${env.deskUrl}/paper/${account}/positions/${id}/add`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ quoteId }) }).then((r) => j<PaperPositionDetail>(r)),
+  paperSell: (account: string, id: string, body: { fraction: number; minProceedsUsd?: number }) =>
+    fetch(`${env.deskUrl}/paper/${account}/positions/${id}/sell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) =>
+      j<{ sale: { proceedsUsd: number; realizedUsd: number }; position: PaperPositionDetail }>(r),
+    ),
   quote: (
     body: {
       ticker: string;
@@ -126,6 +261,11 @@ export const desk = {
     fetch(`${env.deskUrl}/faucet`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ owner }) }).then((r) =>
       j<{ signature: string; sol: number; usdc: number }>(r),
     ),
+  /** Direct-payment mode: save a payment just sent to the desk's pay-to wallet as a position. */
+  recordPayment: (body: { signature: string; forecastHash: string; owner: string }) =>
+    fetch(`${env.deskUrl}/payments`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) =>
+      j<{ position: string }>(r),
+    ),
   streamUrl: (pubkey: string) => `${env.deskUrl}/positions/${pubkey}/stream`,
 };
 
@@ -149,6 +289,7 @@ export interface PositionView {
     owner: string;
     ticker: string | null;
     quote_id: string | null;
+    forecast_hash?: string | null;
     state: string;
     stake_base: string | null;
     max_payout_base: string | null;
@@ -163,6 +304,8 @@ export interface PositionView {
     score_bps: number | null;
     payout_base: string | null;
     note: string | null;
+    /** Set when the position was paid straight to this wallet (direct-payment mode) rather than escrowed. */
+    pay_to?: string | null;
     created_at: number;
     updated_at: number;
   };
