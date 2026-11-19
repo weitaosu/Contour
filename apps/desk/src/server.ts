@@ -89,6 +89,8 @@ export async function buildServer() {
       .optional(),
     // Call/put spread: equal steps between two strikes, sized to stakeUsd.
     spread: z.object({ direction: z.enum(["up", "down"]), from: z.number().finite(), to: z.number().finite() }).optional(),
+    // "range" (Stays near): only positions that lose on both sides of the range.
+    shape: z.enum(["free", "range"]).optional(),
   });
   app.post("/quote", async (req) => {
     const body = quoteBody.parse(req.body);

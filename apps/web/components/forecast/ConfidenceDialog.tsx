@@ -3,7 +3,7 @@
 import { useDeferredValue, useEffect, useMemo, useState } from "react";
 import { Dialog } from "radix-ui";
 import { X } from "lucide-react";
-import { blend, compile, type Ladder } from "@contour/core";
+import { blend, compile, type Ladder, type PositionShape } from "@contour/core";
 import { Slider } from "@/components/ui/Slider";
 import { pct, usd } from "@/lib/format";
 import { isWin } from "@/lib/outcomes";
@@ -22,6 +22,7 @@ export function ConfidenceDialog({
   ladder,
   belief,
   stake,
+  shape = "free",
   value,
   onApply,
 }: {
@@ -30,6 +31,8 @@ export function ConfidenceDialog({
   ladder: Ladder;
   belief: number[];
   stake: number;
+  /** The kind of position the screen builds ("range" for Stays near), so the preview matches it. */
+  shape?: PositionShape;
   value: number;
   onApply: (c: number) => void;
 }) {
@@ -40,7 +43,7 @@ export function ConfidenceDialog({
   const c = useDeferredValue(draft);
   const market = ladder.marketProb;
   const used = useMemo(() => blend(belief, market, c), [belief, market, c]);
-  const quote = useMemo(() => compile({ ladder, belief, confidence: c, stakeUsd: Math.max(1, stake), maxIter: 20_000 }), [ladder, belief, c, stake]);
+  const quote = useMemo(() => compile({ ladder, belief, confidence: c, stakeUsd: Math.max(1, stake), maxIter: 20_000, shape }), [ladder, belief, c, stake, shape]);
   const wins = quote.payoutByBucket.map((p) => isWin(p, stake));
   const chance = market.reduce((s, q, j) => s + (wins[j] ? q : 0), 0);
   const contracts = quote.legs.reduce((a, l) => a + l.usd, 0);

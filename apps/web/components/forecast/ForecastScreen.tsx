@@ -18,7 +18,11 @@ import {
   oddsBelief,
   underlyingName,
   paysIn,
+  outlookParams,
+  outlookStart,
+  OUTLOOK_KEYS,
   type Ladder,
+  type PositionShape,
   type Quote,
 } from "@contour/core";
 import { ArrowRight, Pencil } from "lucide-react";
@@ -137,6 +141,14 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
   const [outlook, setOutlook] = useState<Outlook | null>(null);
   // Two humps either side of the center (the "Big move" outlook) instead of one bell.
   const [split, setSplit] = useState(false);
+  // "Stays near" was the last outlook picked: its position must lose on both sides, so the solver
+  // only buys ranges (see PositionShape). Fine-tuning its bell keeps that; drawing by hand drops it.
+  const [nearPicked, setNearPicked] = useState(false);
+  // How far the picked outlook departs from the market (1 = the tile's preset). A pick starts at the
+  // gentlest strength, and lowest confidence, whose position actually trades (see outlookStart).
+  const [strength, setStrength] = useState(1);
+  // Big move: how far each hump sits from the center, in market standard deviations.
+  const [splitOffset, setSplitOffset] = useState(SPLIT_OFFSET);
   // Whether the user has expressed any view yet (a preset link counts).
   const [started, setStarted] = useState(() => preset.x !== undefined || preset.w !== undefined);
   const [reviewOpen, setReviewOpen] = useState(false);
@@ -232,13 +244,20 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
 
   const pickOutlook = (k: Outlook) => {
     setStrategy("outlook");
-    const o = OUTLOOKS.find((x) => x.key === k)!;
     // Re-read the live price at the moment of the pick, so the view starts from exactly what's shown.
     const at = spot?.price ?? base;
     if (spot) setAnchor(spot.price);
+    // Start where the position trades: raise confidence first, then strengthen the view.
+    const start = ordered ? outlookStart(ladder, k, { anchor: at, stakeUsd: Math.max(1, stake) }) : null;
+    const s = start?.strength ?? 1;
+    const o = outlookParams(k, s);
+    setStrength(s);
     setCenter(clamp(at + o.x * range.sd, range.lo, range.hi));
     setScale(o.w);
-    setSplit(!!o.split);
+    setSplit(o.split !== null);
+    setSplitOffset(o.split ?? SPLIT_OFFSET);
+    if (start) setConfidence(start.confidence);
+    setNearPicked(k === "near");
     setEdit(false);
     setDraft(null);
     setOutlook(k);
@@ -246,7 +265,8 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
   };
 
   const picked = outlook && strategy === "outlook" ? OUTLOOKS.find((o) => o.key === outlook)! : null;
-  const center = picked ? clamp(base + picked.x * range.sd, range.lo, range.hi) : centerState;
+  const center = picked ? clamp(base + outlookParams(picked.key, strength).x * range.sd, range.lo, range.hi) : centerState;
+  const shape: PositionShape = nearPicked && ordered && !edit && !split && strategy === "outlook" ? "range" : "free";
 
   // The user's (unblended) belief.
   const belief = useMemo(() => {
@@ -254,12 +274,23 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
     if (!ordered) return oddsBelief(ladder.marketProb, takes);
     if (edit && (draft || bars)) return fromBars(draft ?? bars!);
     if (split) {
-      const lo = normalBelief(ladder, center - SPLIT_OFFSET * range.sd, range.sd * scale);
-      const hi = normalBelief(ladder, center + SPLIT_OFFSET * range.sd, range.sd * scale);
+      const lo = normalBelief(ladder, center - splitOffset * range.sd, range.sd * scale);
+      const hi = normalBelief(ladder, center + splitOffset * range.sd, range.sd * scale);
       return lo.map((p, j) => (p + hi[j]) / 2);
     }
     return normalBelief(ladder, center, range.sd * scale);
-  }, [ranging, rangeCuts, edit, draft, bars, ordered, ladder, center, range.sd, scale, split, takes]);
+  }, [ranging, rangeCuts, edit, draft, bars, ordered, ladder, center, range.sd, scale, split, splitOffset, takes]);
+
+  // Tiles that can't reach a tradable position at any strength or confidence are shown as unavailable.
+  // Worked out once per market, after the first paint.
+  const [unavailable, setUnavailable] = useState<Outlook[]>([]);
+  useEffect(() => {
+    if (!ordered) return;
+    const t = setTimeout(() => {
+      setUnavailable(OUTLOOK_KEYS.filter((k) => !outlookStart(ladder, k, { anchor: spot?.price ?? mkt.mean, stakeUsd: 100, maxIter: 8_000 })));
+    }, 300);
+    return () => clearTimeout(t);
+  }, [ladder.eventTicker]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // The curve on the chart follows `belief` at once; everything solved from it (the position, its
   // cards and the order panel) follows `solveBelief`, which React may let trail by a frame or two
@@ -275,10 +306,10 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
     // Mid-drag the preview only has to keep up with the curve: a short solve from the last answer.
     // Near the market's own view the solver converges slowly, and 20,000 iterations every frame
     // stalls the drag. Letting go re-solves in full (and asks the desk, whose quote is what signs).
-    const q = compile({ ladder, belief: solveBelief, confidence, stakeUsd: Math.max(1, stake), warmStart: warm.current, maxIter: dragging ? 3_000 : 20_000 });
+    const q = compile({ ladder, belief: solveBelief, confidence, stakeUsd: Math.max(1, stake), warmStart: warm.current, maxIter: dragging ? 3_000 : 20_000, shape });
     warm.current = q.raw.weights;
     return q;
-  }, [ladder, solveBelief, confidence, stake, dragging]);
+  }, [ladder, solveBelief, confidence, stake, dragging, shape]);
   const preview: Omit<Quote, "raw"> & { raw?: Quote["raw"] } = protectQuote ?? spreadQuote ?? viewPreview;
   // In protect mode the amount isn't chosen: it's what the protection costs.
   // What the request asks for; the amount shown comes from the displayed quote (see payStake below).
@@ -292,9 +323,9 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
           ? [ladder.eventTicker, "protect", units, covering ? null : floor, collaring || covering ? cap : null]
           : spreading
             ? [ladder.eventTicker, "spread", spreadDir, spreadIdx, stake]
-            : [ladder.eventTicker, solveBelief, confidence, stake],
+            : [ladder.eventTicker, solveBelief, confidence, stake, shape],
       ),
-    [protecting, covering, collaring, cap, spreading, spreadDir, spreadIdx, ladder.eventTicker, units, floor, solveBelief, confidence, stake],
+    [protecting, covering, collaring, cap, spreading, spreadDir, spreadIdx, ladder.eventTicker, units, floor, solveBelief, confidence, stake, shape],
   );
   // The same request minus the anchor: a picked outlook re-centering on the live price is the same
   // view, so the last desk quote stays on screen (no flash back to the preview) until the new one lands.
@@ -335,7 +366,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
             stakeUsd: stake,
             spread: { direction: spreadDir, from: strikes[spreadIdx[0]], to: strikes[spreadIdx[1]] },
           }
-        : { ticker: ladder.eventTicker, belief: solveBelief, confidence, stakeUsd: stake };
+        : { ticker: ladder.eventTicker, belief: solveBelief, confidence, stakeUsd: stake, ...(shape === "range" ? { shape } : {}) };
     const t = setTimeout(() => {
       desk
         .quote(body, ac.signal)
@@ -415,10 +446,10 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
     if (dragging || protecting || spreading || !noEdge || !started) return null;
     for (const c of CONFIDENCE_LEVELS) {
       if (c <= confidence) continue;
-      if (compile({ ladder, belief: solveBelief, confidence: c, stakeUsd: Math.max(1, stake), maxIter: 8_000 }).advice === "trade") return c;
+      if (compile({ ladder, belief: solveBelief, confidence: c, stakeUsd: Math.max(1, stake), maxIter: 8_000, shape }).advice === "trade") return c;
     }
     return null;
-  }, [dragging, protecting, spreading, noEdge, started, ladder, solveBelief, confidence, stake]);
+  }, [dragging, protecting, spreading, noEdge, started, ladder, solveBelief, confidence, stake, shape]);
   const raiseConfidence = useCallback(() => raiseTo !== null && setConfidence(raiseTo), [raiseTo]);
   // What the result panel says when there's no trade to show (it keeps its shape either way).
   const summaryStatus = useMemo<SummaryStatus | null>(() => {
@@ -490,7 +521,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
   const widthLabel = fmt(width);
   // The view in plain terms. One bell: a 2-in-3 likely range (center ± one standard deviation).
   // Big move: two humps either side of the midpoint, each with its own ± width.
-  const humps = split ? ([center - SPLIT_OFFSET * range.sd, center + SPLIT_OFFSET * range.sd] as const) : null;
+  const humps = split ? ([center - splitOffset * range.sd, center + splitOffset * range.sd] as const) : null;
   const likelyText = humps ? `near ${fmt(humps[0])} or ${fmt(humps[1])}` : `likely ${fmt(center - width)}–${fmt(center + width)}`;
   const viewName = outlook ? OUTLOOKS.find((o) => o.key === outlook)!.title : started ? "Your own view" : "Market's view";
   const unitsText = units.toLocaleString("en-US", { maximumFractionDigits: 4 });
@@ -741,6 +772,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                 live={!!spot}
                 settles={settlesText}
                 step={1}
+                unavailable={unavailable}
                 prompt={!hasPosition}
                 protect={canProtect && floors.length ? { on: strategy === "protect", name, onClick: () => setStrategy(strategy === "protect" ? "outlook" : "protect") } : undefined}
                 more={{ items: moreItems, active: strategy === "outlook" || strategy === "protect" ? null : strategy, onPick: pickStrategy }}
@@ -1011,6 +1043,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                       ladder={ladder}
                       belief={belief}
                       stake={stake}
+                      shape={shape}
                       value={confidence}
                       onApply={setConfidence}
                     />

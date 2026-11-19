@@ -8,6 +8,7 @@
     "start": "tsx src/server.ts",
     "recorder": "tsx src/recorder-main.ts",
     "snapshot": "tsx scripts/snapshot.ts",
+    "qc": "tsx scripts/qc.ts",
     "test": "vitest run",
     "typecheck": "tsc --noEmit"
   },

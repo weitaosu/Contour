@@ -87,7 +87,7 @@ export interface Quote {
   maxAbsorbableStakeUsd: number | null;
   raw: {
     weights: number[];
-    instruments: { index: number; side: "cash" | "yes" | "no"; price: number }[];
+    instruments: { index: number; side: "cash" | "yes" | "no" | "pair"; price: number }[];
     payoutByBucket: number[];
     expectedLogGrowth: number;
     iterations: number;

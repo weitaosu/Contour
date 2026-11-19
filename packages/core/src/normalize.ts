@@ -1,4 +1,4 @@
-import { normalize as normalizeVec } from "./math";
+import { normalize as normalizeVec, normCdf, normSf } from "./math";
 import type { Instrument, Ladder, LadderKind } from "./types";
 
 /** Structural subset of the Gemini event shape that core needs (core has no I/O dependency). */
@@ -205,19 +205,37 @@ export function formatValue(v: number, unit: { prefix: string; suffix: string },
   return `${unit.prefix}${s}${unit.suffix}`;
 }
 
-function toInstrument(c: ContractLike): Instrument {
+/**
+ * A contract's quote as Contour uses it. Gemini fills `buy` with its last trade price on a side that
+ * has no order, which shows up as a locked quote: YES bid = YES ask (yes ask + no ask = $1 exactly).
+ * A locked book can't rest on an exchange (the two orders would match), so only the side the order
+ * book backs is kept: bestAsk backs the YES ask, bestBid (a YES bid) backs the NO ask. With neither,
+ * the contract is treated as unquoted.
+ */
+export function instrumentFromContract(c: ContractLike): Instrument {
+  let yesAsk = num(c.prices?.buy?.yes);
+  let noAsk = num(c.prices?.buy?.no);
+  const bestBid = num(c.prices?.bestBid);
+  const bestAsk = num(c.prices?.bestAsk);
+  const bid = bestBid ?? (noAsk !== null ? 1 - noAsk : null);
+  const ask = bestAsk ?? yesAsk;
+  if (bid !== null && ask !== null && Math.abs(ask - bid) < 1e-9) {
+    if (bestAsk === null) yesAsk = null;
+    if (bestBid === null) noAsk = null;
+  }
   return {
     symbol: c.instrumentSymbol,
     label: c.label,
-    yesAsk: num(c.prices?.buy?.yes),
-    noAsk: num(c.prices?.buy?.no),
-    bestBid: num(c.prices?.bestBid),
-    bestAsk: num(c.prices?.bestAsk),
+    yesAsk,
+    noAsk,
+    bestBid,
+    bestAsk,
     minQty: num(c.quantityMinimum) ?? 0.01,
     qtyStep: num(c.quantityIncrement) ?? 0.01,
     priceStep: num(c.priceIncrement) ?? 0.01,
   };
 }
+const toInstrument = instrumentFromContract;
 
 /** Mid price with fallbacks: bid = bestBid ?? 1 - noAsk; ask = bestAsk ?? yesAsk. */
 export function instrumentMid(i: Instrument): number | null {
@@ -249,17 +267,104 @@ function bidAsk(i: Instrument): { bid: number | null; ask: number | null } {
   return { bid: i.bestBid ?? (i.noAsk !== null ? 1 - i.noAsk : null), ask: i.bestAsk ?? i.yesAsk };
 }
 
+/** Inverse standard normal CDF by bisection (only called on a handful of points per ladder). */
+function normInv(p: number): number {
+  let lo = -12;
+  let hi = 12;
+  for (let k = 0; k < 80; k++) {
+    const m = (lo + hi) / 2;
+    if (normCdf(m) < p) lo = m;
+    else hi = m;
+  }
+  return (lo + hi) / 2;
+}
+
+/**
+ * A normal fitted to the priced strikes: Φ⁻¹(1 − P(X ≥ s)) = (s − μ)/σ, least squares. Null when the
+ * prices don't slope down (too few points, or they contradict each other).
+ */
+function fitNormal(xs: number[], ps: number[]): { mu: number; sigma: number } | null {
+  const pts = xs.map((x, i) => [x, ps[i]] as const).filter(([, p]) => p > 0.005 && p < 0.995);
+  if (pts.length < 2) return null;
+  const zs = pts.map(([, p]) => normInv(1 - p));
+  const mx = pts.reduce((a, [x]) => a + x, 0) / pts.length;
+  const mz = zs.reduce((a, z) => a + z, 0) / zs.length;
+  let sxx = 0;
+  let sxz = 0;
+  pts.forEach(([x], i) => {
+    sxx += (x - mx) ** 2;
+    sxz += (x - mx) * (zs[i] - mz);
+  });
+  if (!(sxx > 0) || !(sxz > 0)) return null;
+  const slope = sxz / sxx;
+  return { mu: mx - mz / slope, sigma: 1 / slope };
+}
+
+/**
+ * Two or more unpriced strikes at an end of the ladder taper along a normal fitted to the priced
+ * strikes, starting from the last price, instead of keeping it flat: flat would put all of the
+ * missing probability into the open-ended end bucket ("Below X", "X or above"). A single unpriced
+ * end strike keeps the flat value, as scripts/fixtures/reference.py does.
+ */
+function taperTails(values: number[], strikes: number[], reliable: boolean[]): number[] {
+  const idx = reliable.map((r, i) => (r ? i : -1)).filter((i) => i >= 0);
+  if (!idx.length) return values;
+  const F = idx[0];
+  const L = idx[idx.length - 1];
+  if (F < 2 && strikes.length - 1 - L < 2) return values;
+  const fit =
+    fitNormal(
+      idx.map((i) => strikes[i]),
+      idx.map((i) => values[i]),
+    ) ?? { mu: (strikes[F] + strikes[L]) / 2, sigma: Math.max((strikes[L] - strikes[F]) / 2, Math.abs(strikes[1] - strikes[0]) || 1) };
+  const z = (s: number) => (s - fit.mu) / fit.sigma;
+  const out = [...values];
+  if (strikes.length - 1 - L >= 2) {
+    const base = normSf(z(strikes[L]));
+    for (let i = L + 1; i < strikes.length; i++) out[i] = base > 1e-300 ? values[L] * (normSf(z(strikes[i])) / base) : 0;
+  }
+  if (F >= 2) {
+    const base = normCdf(z(strikes[F]));
+    for (let i = 0; i < F; i++) out[i] = base > 1e-300 ? 1 - (1 - values[F]) * (normCdf(z(strikes[i])) / base) : 1;
+  }
+  return out;
+}
+
+/**
+ * Prices that contradict each other on a threshold ladder: a higher strike bid more than `tol` above
+ * a lower strike's ask. Buying the lower strike and selling the higher one would then be free money,
+ * so the prices can't be read as one market's odds. Crossed quotes (stale) are skipped.
+ */
+export const MAX_CONTRADICTION = 0.05;
+export function contradiction(instruments: Instrument[], strikes: number[], tol = MAX_CONTRADICTION): { low: number; high: number; ask: number; bid: number } | null {
+  const q = instruments.map(bidAsk);
+  const ok = q.map(({ bid, ask }) => !(bid !== null && ask !== null && bid > ask + 1e-9));
+  let worst: { low: number; high: number; ask: number; bid: number } | null = null;
+  for (let i = 0; i < q.length; i++) {
+    const ask = q[i].ask;
+    if (!ok[i] || ask === null) continue;
+    for (let j = i + 1; j < q.length; j++) {
+      const bid = q[j].bid;
+      if (!ok[j] || bid === null) continue;
+      if (bid - ask > tol && (!worst || bid - ask > worst.bid - worst.ask)) worst = { low: strikes[i], high: strikes[j], ask, bid };
+    }
+  }
+  return worst;
+}
+
 /**
  * The market's P(price ≥ strike) for a threshold ladder. Only tight two-sided quotes are evidence;
- * the rest are filled in from their neighbours and then kept inside whatever bound their quote does
- * show, so a stale, one-sided or very wide quote can't bend the curve. Finally the curve is forced
- * non-increasing (running minimum, as in scripts/fixtures/reference.py).
+ * the rest are filled in from their neighbours (long unpriced tails taper, see taperTails) and then
+ * kept inside whatever bound their quote does show, so a stale, one-sided or very wide quote can't
+ * bend the curve. Finally the curve is forced non-increasing (running minimum, as in
+ * scripts/fixtures/reference.py); ladders whose prices contradict each other are rejected before
+ * this, so the running minimum only ever smooths small wobbles.
  */
 export function thresholdSurvival(instruments: Instrument[], strikes: number[]): { values: number[]; reliable: boolean[] } {
   const quotes = instruments.map(bidAsk);
   const reliable = quotes.map(({ bid, ask }) => bid !== null && ask !== null && ask >= bid - 1e-9 && ask - bid <= MAX_RELIABLE_SPREAD + 1e-9);
   const mids = quotes.map((q, i) => (reliable[i] ? (q.bid! + q.ask!) / 2 : null));
-  const { values } = interpolate(strikes, mids);
+  const values = taperTails(interpolate(strikes, mids).values, strikes, reliable);
   const bounded = values.map((v, i) => {
     const { bid, ask } = quotes[i];
     let x = Math.min(1, Math.max(0, v));
@@ -273,6 +378,55 @@ export function thresholdSurvival(instruments: Instrument[], strikes: number[]):
   const out: number[] = [];
   bounded.forEach((v, i) => out.push(Math.min(v, i > 0 ? out[i - 1] : 1)));
   return { values: out, reliable };
+}
+
+/**
+ * Chances for a set of outcomes where exactly one wins (weather buckets, named outcomes): they sum to
+ * 1 and stay inside each outcome's own quote where they can. Tight two-sided quotes start at their
+ * mid; on ordered buckets an unpriced gap between priced outcomes is filled linearly, and outcomes
+ * beyond the priced ones start at 0 (never at a neighbour's price). Every outcome is then held
+ * inside its bid and ask, one-sided quotes included, and the difference to 1 is shared out in
+ * proportion to how loosely each outcome is priced, so tight quotes barely move and unpriced
+ * outcomes take up the slack.
+ */
+export function exclusiveProbs(instruments: Instrument[], centers: number[] | null): { probs: number[]; reliable: boolean[] } {
+  const q = instruments.map(bidAsk);
+  const crossed = q.map(({ bid, ask }) => bid !== null && ask !== null && bid > ask + 1e-9);
+  const reliable = q.map(({ bid, ask }, i) => !crossed[i] && bid !== null && ask !== null && ask - bid <= MAX_RELIABLE_SPREAD + 1e-9);
+  const mids = q.map(({ bid, ask }, i) => (reliable[i] || crossed[i] ? (bid! + ask!) / 2 : null));
+  const start = mids.map((m) => m ?? 0);
+  if (centers) {
+    const known = reliable.map((r, i) => (r ? i : -1)).filter((i) => i >= 0);
+    for (let k = 1; k < known.length; k++) {
+      const a = known[k - 1];
+      const b = known[k];
+      for (let i = a + 1; i < b; i++) {
+        if (mids[i] !== null) continue;
+        const t = (centers[i] - centers[a]) / (centers[b] - centers[a]);
+        start[i] = mids[a]! + t * (mids[b]! - mids[a]!);
+      }
+    }
+  }
+  const lo = q.map(({ bid }, i) => (crossed[i] || bid === null ? 0 : Math.min(1, Math.max(0, bid))));
+  const hi = q.map(({ ask }, i) => (crossed[i] || ask === null ? 1 : Math.min(1, Math.max(lo[i], ask))));
+  const w = lo.map((l, i) => Math.max(0.01, hi[i] - l));
+  const at = (lambda: number) => start.map((s, i) => Math.min(hi[i], Math.max(lo[i], s + lambda * w[i])));
+  const total = (lambda: number) => at(lambda).reduce((a, b) => a + b, 0);
+  let a = -100;
+  let b = 100;
+  let lambda: number;
+  if (total(a) >= 1) lambda = a;
+  else if (total(b) <= 1) lambda = b;
+  else {
+    for (let k = 0; k < 100; k++) {
+      const m = (a + b) / 2;
+      if (total(m) < 1) a = m;
+      else b = m;
+    }
+    lambda = (a + b) / 2;
+  }
+  // Quotes that can't add up to 1 at all (bids over 1, or asks under 1) are scaled to fit.
+  return { probs: at(lambda), reliable };
 }
 
 export class LadderRejected extends Error {}
@@ -298,6 +452,13 @@ export function normalizeEvent(e: EventLike, opts: NormalizeOptions = {}): Ladde
     const strikes = sorted.map(strikeOf);
     const instruments = sorted.map(toInstrument);
     const n = strikes.length;
+    const bad = opts.allowUnquoted ? null : contradiction(instruments, strikes);
+    if (bad) {
+      const fv = (v: number) => formatValue(v, unit);
+      throw new LadderRejected(
+        `prices contradict each other: above ${fv(bad.high)} is bid ${Math.round(bad.bid * 100)}¢ while above ${fv(bad.low)} is offered at ${Math.round(bad.ask * 100)}¢`,
+      );
+    }
     const { values: m, reliable } = thresholdSurvival(instruments, strikes);
     const reliableCount = reliable.filter(Boolean).length;
     if (!opts.allowUnquoted && reliableCount < MIN_QUOTED)
@@ -333,7 +494,7 @@ export function normalizeEvent(e: EventLike, opts: NormalizeOptions = {}): Ladde
     const centers = parsed.map((p) =>
       p.lo === null ? cuts[0] - 1 : p.hi === null ? cuts[cuts.length - 1] + 1 : ((p.lo as number) + (p.hi as number)) / 2,
     );
-    const { values, filled } = interpolate(centers, instruments.map(instrumentMid));
+    const { probs, reliable } = exclusiveProbs(instruments, centers);
     ladder = {
       ...base,
       kind: "buckets",
@@ -353,14 +514,14 @@ export function normalizeEvent(e: EventLike, opts: NormalizeOptions = {}): Ladde
         return formatValue(c, unit, true);
       }),
       instruments,
-      marketProb: normalizeVec(values.map((v) => Math.max(0, v)), PROB_FLOOR),
+      marketProb: normalizeVec(probs, PROB_FLOOR),
       quoted: instruments.map((i) => i.yesAsk !== null && i.noAsk !== null),
       crossed: instruments.map((i) => i.yesAsk !== null && i.noAsk !== null && i.yesAsk + i.noAsk < 1 - 1e-9),
-      interpolated: filled,
+      interpolated: reliable.map((r) => !r),
     };
   } else {
     const instruments = e.contracts.map(toInstrument);
-    const mids = instruments.map(instrumentMid);
+    const { probs, reliable } = exclusiveProbs(instruments, null);
     ladder = {
       ...base,
       kind: "categorical",
@@ -369,10 +530,10 @@ export function normalizeEvent(e: EventLike, opts: NormalizeOptions = {}): Ladde
       bucketLabels: e.contracts.map((c) => c.label),
       cutLabels: [],
       instruments,
-      marketProb: normalizeVec(mids.map((v) => (v === null ? 0 : Math.max(0, v))), PROB_FLOOR),
+      marketProb: normalizeVec(probs, PROB_FLOOR),
       quoted: instruments.map((i) => i.yesAsk !== null && i.noAsk !== null),
       crossed: instruments.map((i) => i.yesAsk !== null && i.noAsk !== null && i.yesAsk + i.noAsk < 1 - 1e-9),
-      interpolated: mids.map((m) => m === null),
+      interpolated: reliable.map((r) => !r),
     };
   }
 

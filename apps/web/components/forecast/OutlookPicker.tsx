@@ -48,7 +48,10 @@ export function OutlookPicker({
   step = 1,
   prompt = false,
   settles,
+  unavailable = [],
 }: {
+  /** Outlooks with no tradable position on this market at any strength or confidence. */
+  unavailable?: Outlook[];
   value: Outlook | null;
   onPick: (o: Outlook) => void;
   /** The price the outlooks are relative to: the live price when there is one, else the market's expected price. */
@@ -127,6 +130,7 @@ export function OutlookPicker({
           >
             {OUTLOOKS.map((o, i) => {
               const on = i === active;
+              const off = unavailable.includes(o.key) && !on;
               return (
                 <button
                   key={o.key}
@@ -136,9 +140,12 @@ export function OutlookPicker({
                   type="button"
                   role="radio"
                   aria-checked={on}
+                  aria-disabled={off}
+                  disabled={off}
+                  title={off ? `No ${o.title.toLowerCase()} position is worth buying at these prices, even at full confidence.` : undefined}
                   tabIndex={on || (active < 0 && i === 0) ? 0 : -1}
-                  onClick={() => onPick(o.key)}
-                  className={chip(on)}
+                  onClick={() => !off && onPick(o.key)}
+                  className={`${chip(on)} ${off ? "pointer-events-none opacity-45" : ""}`}
                 >
                   <span className="flex items-center justify-between gap-1.5">
                     <span className={`truncate text-[15px] font-bold leading-tight ${on ? "text-signal-violet" : "text-inkstone"}`}>{o.title}</span>
@@ -155,7 +162,7 @@ export function OutlookPicker({
                     />
                   </svg>
                   </span>
-                  <span className="tnum mt-0.5 block truncate text-[12.5px] text-slate">{o.sub(center)}</span>
+                  <span className="tnum mt-0.5 block truncate text-[12.5px] text-slate">{off ? "no trade at these prices" : o.sub(center)}</span>
                 </button>
               );
             })}

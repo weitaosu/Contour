@@ -8,6 +8,8 @@ import {
   protect,
   spread,
   tryNormalize,
+  instrumentFromContract,
+  anyViewTrades,
   type DepthMap,
   type Ladder,
   type Quote,
@@ -47,6 +49,9 @@ export interface CategorySection {
 }
 
 /** Why a market can't be one curve, for a reader rather than a log. */
+/** Why a market with readable prices still isn't listed (see anyViewTrades). */
+export const NO_VIEW_REASON = "no view trades: every outlook is too close to the market's prices";
+
 export function plainReason(reason: string): string {
   if (/fewer than \d+ outcomes/.test(reason)) return "A single yes/no question";
   if (/not provably mutually exclusive/.test(reason)) return "More than one outcome can come true";
@@ -54,6 +59,8 @@ export function plainReason(reason: string): string {
   if (/spread/.test(reason)) return "A point spread";
   if (/several underlyings/.test(reason)) return "Player props: several stats in one market";
   if (/quoted|tight two-sided/.test(reason)) return "Too thinly quoted right now";
+  if (/contradict/.test(reason)) return "Its prices contradict each other right now";
+  if (/too close/.test(reason)) return "Too close to its own prices to trade right now";
   if (/exceeds the/.test(reason)) return "Too many outcomes for one position";
   if (/duplicate strikes/.test(reason)) return "More than one underlying";
   return "Its outcomes don't form one set";
@@ -116,6 +123,19 @@ export class MarketService {
 
   constructor(public client: GeminiPublicClient) {}
 
+  /** Per market: whether any one-tap view trades, kept until the market's prices change. */
+  private viewable = new Map<string, { sig: string; ok: boolean }>();
+  private async anyView(ticker: string, ladder: Ladder): Promise<boolean> {
+    const sig = JSON.stringify(ladder.instruments.map((i) => [i.yesAsk, i.noAsk, i.bestBid, i.bestAsk]));
+    const hit = this.viewable.get(ticker);
+    if (hit && hit.sig === sig) return hit.ok;
+    // The check can take a few dozen solves on a market that never trades: let other requests in first.
+    await new Promise((r) => setImmediate(r));
+    const ok = anyViewTrades(ladder);
+    this.viewable.set(ticker, { sig, ok });
+    return ok;
+  }
+
   /** The categories to list: every category Gemini has ("*"), or the configured ones. */
   private async categories(): Promise<string[]> {
     if (!config.marketCategories.includes("*")) return config.marketCategories;
@@ -170,7 +190,10 @@ export class MarketService {
       const sample = sampleTickers.has(e.ticker);
       // Frozen markets may have expired since; keep them so the demo can still be explored.
       if (frozenAt === null && !sample && new Date(e.expiryDate).getTime() < Date.now() + CLOSE_BUFFER_MS) continue;
-      const r = tryNormalize(e, { categoricalAllowlist: allowlist() });
+      let r = tryNormalize(e, { categoricalAllowlist: allowlist() });
+      // A market where no one-tap view trades has nothing to offer: every outlook says "too close
+      // to the market's". Samples are always kept (they exist to be explored).
+      if ("ladder" in r && !sample && !(await this.anyView(e.ticker, r.ladder))) r = { reason: NO_VIEW_REASON };
       const vol = Number(e.volume ?? 0) || 0;
       const vol24 = Number(e.volume24h ?? 0) || 0;
       if (!sample) {
@@ -367,13 +390,16 @@ export class MarketService {
     const held = sample ? undefined : this.events.get(ticker);
     const frozen = !!held?.frozen;
     const pair = sample || frozen ? null : MarketService.spotPair(event);
-    const num = (v: string | null | undefined) => (v === null || v === undefined || v === "" || !Number.isFinite(Number(v)) ? null : Number(v));
     return {
       at: held?.at ?? Date.now(),
       frozen,
       sample,
       spot: pair ? await this.spot(pair, maxAgeMs) : null,
-      asks: event.contracts.map((c) => ({ symbol: c.instrumentSymbol, yesAsk: num(c.prices?.buy?.yes), noAsk: num(c.prices?.buy?.no) })),
+      // The same cleaned asks the ladder uses: a last-trade price with no order behind it is no ask.
+      asks: event.contracts.map((c) => {
+        const i = instrumentFromContract(c);
+        return { symbol: c.instrumentSymbol, yesAsk: i.yesAsk, noAsk: i.noAsk };
+      }),
     };
   }
 
@@ -416,6 +442,8 @@ export interface QuoteRequest {
   protect?: { units: number; floor?: number; cap?: number };
   /** Call/put spread built from equal steps between two strikes, sized to stakeUsd. */
   spread?: { direction: "up" | "down"; from: number; to: number };
+  /** "range" for Stays near: the solver only buys positions that lose on both sides. */
+  shape?: "free" | "range";
 }
 
 export interface StoredQuote {
@@ -438,6 +466,7 @@ export interface StoredQuote {
     capturedAt: string;
     protect?: { units: number; floor?: number; cap?: number };
     spread?: { direction: "up" | "down"; from: number; to: number };
+    shape?: "range";
   };
   quote: Omit<Quote, "raw"> & { iterations: number };
   marketProb: number[];
@@ -475,10 +504,10 @@ export async function makeQuote(markets: MarketService, db: DB, req: QuoteReques
     quote = spread({ ladder, direction: req.spread.direction, from: req.spread.from, to: req.spread.to, stakeUsd: req.stakeUsd });
     if (!quote.legs.length) throw Object.assign(new Error("The amount is too small for one contract per step."), { statusCode: 422 });
   } else {
-    quote = compile({ ladder, belief: req.belief, confidence: req.confidence, stakeUsd: req.stakeUsd });
+    quote = compile({ ladder, belief: req.belief, confidence: req.confidence, stakeUsd: req.stakeUsd, shape: req.shape });
     if (opts.withDepth !== false && quote.legs.length > 0) {
       const depth = await markets.depthFor(ladder, [...new Set(quote.legs.map((l) => l.instrumentIndex))]);
-      quote = compile({ ladder, belief: req.belief, confidence: req.confidence, stakeUsd: req.stakeUsd, depth, warmStart: quote.raw.weights });
+      quote = compile({ ladder, belief: req.belief, confidence: req.confidence, stakeUsd: req.stakeUsd, depth, warmStart: quote.raw.weights, shape: req.shape });
     }
   }
   const quoteId = randomUUID();
@@ -493,6 +522,8 @@ export async function makeQuote(markets: MarketService, db: DB, req: QuoteReques
     capturedAt,
     ...(req.protect ? { protect: { units: req.protect.units, floor: req.protect.floor, cap: req.protect.cap } } : {}),
     ...(req.spread ? { spread: { direction: req.spread.direction, from: req.spread.from, to: req.spread.to } } : {}),
+    // How the schedule was built, so the record can be re-derived (absent for the default, free solve).
+    ...(!direct && req.shape === "range" ? { shape: "range" as const } : {}),
   };
   const hash = forecastHash(preimage);
   const expiryTs = Math.floor(new Date(ladder.expiry).getTime() / 1000);

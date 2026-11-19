@@ -111,6 +111,8 @@ export const desk = {
       /** Floor (protect), floor + cap (collar), or cap only (covered call). */
       protect?: { units: number; floor?: number; cap?: number };
       spread?: { direction: "up" | "down"; from: number; to: number };
+      /** "range" for Stays near: only positions that lose on both sides. */
+      shape?: "free" | "range";
     },
     signal?: AbortSignal,
   ) =>

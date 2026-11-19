@@ -80,10 +80,17 @@ describe("thin ladders (a market's last minutes)", () => {
 
   it("reads the odds from tight quotes only, so junk quotes can't make the curve two-humped", () => {
     const l = normalizeEvent(ev(4));
-    // P(≥103) = 0.8 and P(≥106) = 0.2 from the tight quotes; the tails get the rest, nothing spurious in between.
-    expect(l.marketProb[0]).toBeCloseTo(0.2, 2);
-    expect(l.marketProb[10]).toBeCloseTo(0.2, 2);
-    [1, 2, 3, 7, 8, 9].forEach((j) => expect(l.marketProb[j]).toBeLessThan(0.01));
+    const q = l.marketProb;
+    const sum = (a: number, b: number) => q.slice(a, b + 1).reduce((s, x) => s + x, 0);
+    // P(≥103) = 0.8 and P(≥106) = 0.2 from the tight quotes: 20% in each priced bucket between them.
+    [4, 5, 6].forEach((j) => expect(q[j]).toBeCloseTo(0.2, 2));
+    // The rest tapers into each tail instead of piling into the end bucket ("Below $100", "$109 or above").
+    expect(sum(0, 3)).toBeCloseTo(0.2, 2);
+    expect(sum(7, 10)).toBeCloseTo(0.2, 2);
+    expect(q[0]).toBeLessThan(q[3]);
+    expect(q[10]).toBeLessThan(q[7]);
+    for (let j = 1; j <= 3; j++) expect(q[j]).toBeGreaterThanOrEqual(q[j - 1] - 1e-9);
+    for (let j = 8; j <= 10; j++) expect(q[j]).toBeLessThanOrEqual(q[j - 1] + 1e-9);
   });
 
   it("refuses a ladder with fewer than three tight quotes", () => {
@@ -386,7 +393,14 @@ describe("properties", () => {
   it("weights sum to 1, payouts positive, legs + cash = stake to the cent", () => {
     fc.assert(
       fc.property(param, ({ ev, shift, scale, conf, stake }) => {
-        const l: Ladder = normalizeEvent(ev);
+        // The per-strike noise can make a higher strike bid above a lower one's ask: refusing that
+        // ladder is the right answer, not a failure.
+        const r = tryNormalize(ev);
+        if (!("ladder" in r)) {
+          expect(r.reason).toMatch(/contradict/);
+          return;
+        }
+        const l: Ladder = r.ladder;
         const belief = fromMarket(l, shift, scale);
         const q = compile({ ladder: l, belief, confidence: conf, stakeUsd: stake, maxIter: 20_000 });
         const ws = q.raw.weights.reduce((a, b) => a + b, 0);
@@ -422,10 +436,11 @@ describe("properties", () => {
         ev.contracts.forEach((c, i) => {
           if (i % 3 === 0) c.prices = { buy: { yes: (junk[i] / 100).toFixed(2), no: "0.10" }, bestBid: null, bestAsk: (junk[i] / 100).toFixed(2) };
         });
-        // Too few clean quotes left is a valid answer: the ladder is refused rather than misread.
+        // Too few clean quotes left, or quotes that contradict each other, are valid answers: the
+        // ladder is refused rather than misread.
         const r = tryNormalize(ev);
         if (!("ladder" in r)) {
-          expect(r.reason).toMatch(/tight two-sided quotes/);
+          expect(r.reason).toMatch(/tight two-sided quotes|contradict/);
           return;
         }
         const l = r.ladder;
