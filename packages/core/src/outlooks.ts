@@ -25,8 +25,6 @@ export const OUTLOOK_SPLIT_OFFSET = 1.5;
  * point that trades (see outlookStart). 1 is the tile's own preset.
  */
 export const OUTLOOK_STRENGTHS = [1, 1.5, 2, 3] as const;
-/** The confidence levels the screen offers, tried before strengthening the view. */
-export const START_CONFIDENCES = [0.5, 0.75, 1] as const;
 /** The "How sure" slider's range (the bell's width as a multiple of the market's). */
 export const MIN_WIDTH = 0.4;
 export const MAX_WIDTH = 1.6;
@@ -65,21 +63,20 @@ export function outlookBelief(ladder: Ladder, key: OutlookKey, anchor?: number |
 }
 
 /**
- * Where a tile should start so its position actually trades: the gentlest strength, and at it the
- * lowest confidence, that gives a position (not "too close to the market"). Null when nothing up to
- * the strongest view at 100% confidence trades.
+ * Where a tile should start so its position actually trades: the gentlest strength that gives a
+ * position (not "too close to the market") at the given confidence (default 1, a full match to the
+ * view). Null when nothing up to the strongest view trades.
  */
 export function outlookStart(
   ladder: Ladder,
   key: OutlookKey,
-  opts: { anchor?: number | null; stakeUsd?: number; maxIter?: number } = {},
+  opts: { anchor?: number | null; stakeUsd?: number; maxIter?: number; confidence?: number } = {},
 ): { strength: number; confidence: number } | null {
+  const confidence = opts.confidence ?? 1;
   for (const strength of OUTLOOK_STRENGTHS) {
     const { belief } = outlookBelief(ladder, key, opts.anchor, strength);
-    for (const confidence of START_CONFIDENCES) {
-      const q = compile({ ladder, belief, confidence, stakeUsd: opts.stakeUsd ?? 100, maxIter: opts.maxIter ?? 20_000, shape: outlookShape(key) });
-      if (q.advice === "trade") return { strength, confidence };
-    }
+    const q = compile({ ladder, belief, confidence, stakeUsd: opts.stakeUsd ?? 100, maxIter: opts.maxIter ?? 20_000, shape: outlookShape(key) });
+    if (q.advice === "trade") return { strength, confidence };
   }
   return null;
 }

@@ -158,9 +158,11 @@ async function onOpened(ctx: HandlerCtx, position: string, d: Record<string, unk
   const openedMs = Number(g(d, "openedTs")) * 1000;
   if (openedMs - quote.createdAt > config.acceptMaxQuoteAgeMs) return note("Quote was older than 60 seconds at open; not accepting.");
 
-  // 2. Re-price the legs at current asks, Gemini's taker fees included (the quote's cash is already net of fees).
+  // 2. Re-price the legs at current asks, Gemini's taker fees included. The escrow holds what the legs
+  // and fees cost at the quote (older quotes also escrowed the cash, which then counts as spent here).
   const legs = quote.quote.legs;
-  let cost = quote.quote.cashUsd;
+  const kept = Number(quote.keptBaseUnits ?? 0) / 1e6;
+  let cost = quote.quote.cashUsd - kept;
   const feeRate = quote.quote.feeRate ?? GEMINI_TAKER_FEE_RATE;
   try {
     const fresh = await ctx.markets.getEvent(quote.ticker, 0);
@@ -173,7 +175,8 @@ async function onOpened(ctx: HandlerCtx, position: string, d: Record<string, unk
     return note(`Could not re-price on Gemini (${(err as Error).message}); not accepting.`);
   }
   const stake = Number(quote.stakeBaseUnits) / 1e6;
-  if (cost > stake * (1 + config.maxRepriceOverStake)) {
+  // The slack stays a share of the whole amount the user set (escrowed or not), as before.
+  if (cost > stake + (stake + kept) * config.maxRepriceOverStake) {
     return note(`Prices moved: the legs now cost $${cost.toFixed(2)} for a $${stake.toFixed(2)} stake; not accepting. Cancel to get your stake back.`);
   }
 

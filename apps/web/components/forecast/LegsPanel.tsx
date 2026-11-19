@@ -2,12 +2,12 @@
 
 import { memo } from "react";
 import type { Quote } from "@contour/core";
-import { cents, qty, usd } from "@/lib/format";
+import { cents, notableUnused, qty, usd } from "@/lib/format";
 
-/** The contracts (and escrowed cash) behind a position, with where the prices come from. */
+/** The contracts behind a position (and the part of the amount it doesn't need), with where the prices come from. */
 export const LegsTable = memo(function LegsTable({ quote, paper, crossed, compact = false }: { quote: Omit<Quote, "raw">; paper: boolean; crossed: string[]; compact?: boolean }) {
   if (compact) {
-    const total = quote.legs.reduce((a, l) => a + l.usd, 0) + quote.cashUsd;
+    const total = quote.legs.reduce((a, l) => a + l.usd, 0) + quote.feesUsd;
     return (
       <div>
         <table className="w-full text-[13px] leading-[19px]" title={crossed.length ? `Crossed quotes skipped: ${crossed.join(", ")}` : undefined}>
@@ -33,9 +33,9 @@ export const LegsTable = memo(function LegsTable({ quote, paper, crossed, compac
             ))}
             <tr className="border-t border-mist">
               <td className="py-[2px]" colSpan={2}>
-                <b>Total</b>{" "}
+                <b>Escrowed</b>{" "}
                 <span className="text-slate">
-                  incl. {usd(quote.cashUsd)} cash in escrow · {usd(quote.feesUsd)} fees
+                  incl. {usd(quote.feesUsd)} fees{notableUnused(quote.cashUsd) ? <> · {usd(quote.cashUsd)} not needed</> : null}
                 </span>
               </td>
               <td className="tnum py-[2px] text-right font-bold">{usd(total)}</td>
@@ -75,8 +75,8 @@ export const LegsTable = memo(function LegsTable({ quote, paper, crossed, compac
               </tr>
             ))}
             <tr className="border-t border-mist">
-              <td className="py-2 font-bold">Cash</td>
-              <td className="py-2 text-slate">held in escrow</td>
+              <td className="py-2 font-bold">Unused</td>
+              <td className="py-2 text-slate">not needed for this view, not charged</td>
               <td />
               <td />
               <td className="tnum py-2 text-right">{usd(quote.cashUsd)}</td>

@@ -67,7 +67,7 @@ function LivePreview({ ticker }: { ticker: string | null }) {
     const ladder = source;
     const sd = marketMoments(ladder).sd;
     const belief = fromMarket(ladder, viewSpec.shift * sd, viewSpec.scale);
-    const quote = compile({ ladder, belief, confidence: 0.5, stakeUsd: 100 });
+    const quote = compile({ ladder, belief, confidence: 1, stakeUsd: 100 });
     const [a, b] = likelyRange(ladder.marketProb, 0.5);
     return { ladder, belief, quote, likely: { from: a, to: b } };
   }, [source, viewSpec]);
@@ -353,8 +353,8 @@ const KINDS = [
 
 const FAQ: [string, string][] = [
   ["Why not just buy one contract?", "One contract pays only if the outcome lands past one strike. A Contour position pays across the whole range you believe in, with a floor you can see before you sign. On the SOL calm-week example it profits anywhere from $67 to $77 and cannot lose more than $37."],
-  ["More legs means more spread paid.", "Yes. The solver optimizes at ask prices, so costs are inside the answer, and the screen shows the expected return if the market is right. When costs exceed your edge it holds cash and tells you there is no trade."],
-  ["Users are overconfident; won't Kelly sizing ruin them?", "The confidence dial defaults to one quarter, the log objective keeps every payout above zero, and stake is capped per position and per day by the Solana program, not the app."],
+  ["More legs means more spread paid.", "Yes. The solver optimizes at ask prices, so costs are inside the answer, and the screen shows the expected return if the market is right. When costs exceed your edge it buys nothing and tells you there is no trade."],
+  ["Users are overconfident; won't Kelly sizing ruin them?", "Sizing follows the Kelly rule, which only puts in what your view's edge justifies and never charges the part it doesn't need. Unsure? Follow your view less closely and it puts in less. Stake is also capped per position and per day by the Solana program, not the app."],
   ["Why is this on a blockchain at all?", "For the locked payout schedule, the user-side timeouts, and a forecast record that cannot be backdated. The desk's collateral sits in escrow before any hedge is placed."],
   ["The desk is still a trusted party.", "Only for posting the outcome, which is public and checkable against Gemini's settlement data. It cannot change the payout schedule or withhold funds; if it never posts, anyone can unwind after a grace period."],
   ["What is simulated in this demo?", "Escrow, deposits, collateral and payouts are real devnet transactions with test USDC. The desk's hedge fills are simulated at live Gemini quotes and labelled as such."],

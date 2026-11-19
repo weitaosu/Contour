@@ -58,8 +58,8 @@ export function ConfidenceDialog({
         <Dialog.Content className="fade-up fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto rounded-t-[32px] bg-porcelain px-6 pb-8 pt-6 md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:w-[min(620px,calc(100vw-32px))] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[36px] md:p-8">
           <div className="flex items-start justify-between gap-4">
             <div>
-              <p className="eyebrow">Custom confidence</p>
-              <Dialog.Title className="mt-1 text-[24px] font-bold leading-tight text-inkstone">How much should your view count?</Dialog.Title>
+              <p className="eyebrow">Custom setting</p>
+              <Dialog.Title className="mt-1 text-[24px] font-bold leading-tight text-inkstone">How closely should we follow your view?</Dialog.Title>
             </div>
             <Dialog.Close className="rounded-full p-2 text-slate hover:bg-cloud" aria-label="Close">
               <X size={20} />
@@ -67,8 +67,8 @@ export function ConfidenceDialog({
           </div>
 
           <Dialog.Description className="mt-3 text-[15px] text-slate">
-            Contour never trades on your view alone. It blends your view with the market&apos;s, then sizes the position that grows your money fastest on
-            average if those blended odds are right (the Kelly rule). Confidence is the weight your view gets in that blend.
+            At 100%, Contour trades on your view as it is: the closest match Gemini&apos;s prices allow. Below that, it blends your view with the market&apos;s and
+            sizes the position for those blended odds (the Kelly rule), which puts in less, so a wrong call costs less.
           </Dialog.Description>
 
           {/* the formula, with the live weights */}
@@ -86,15 +86,15 @@ export function ConfidenceDialog({
 
           <div className="mt-5">
             <Slider
-              label="Your view's weight"
+              label="Follow your view"
               value={draft}
               min={0.05}
               max={1}
               step={0.01}
               onChange={(v) => setDraft(Math.round(v * 100) / 100)}
               display={pct(draft)}
-              valueText={`${Math.round(draft * 100)} percent weight on your view`}
-              ends={["Trust the market", "Trust my view"]}
+              valueText={`Follow your view ${Math.round(draft * 100)} percent`}
+              ends={["Safer", "Full match"]}
             />
             <div className="mt-3 flex flex-wrap gap-2">
               {QUICK.map((q) => (
@@ -109,7 +109,7 @@ export function ConfidenceDialog({
           <div className="mt-6 border-t border-mist pt-5" aria-live="polite">
             <p className="stat-label">At {pct(c)} on a {usd(stake, 0)} position</p>
             {noTrade ? (
-              <p className="mt-2 text-inkstone">The blended odds sit too close to the market&apos;s to beat fees and spreads, so everything stays in cash.</p>
+              <p className="mt-2 text-inkstone">The blended odds sit too close to the market&apos;s to beat fees and spreads, so nothing is bought.</p>
             ) : (
               <div className="mt-3 grid grid-cols-3 gap-3">
                 <Effect label="Really at risk" value={usd(stake - quote.minPayout)} />
@@ -123,8 +123,8 @@ export function ConfidenceDialog({
                 thinks it has; it bets only when the gap beats Gemini&apos;s fees and spreads.
               </li>
               <li>
-                The Kelly rule puts <b className="tnum text-inkstone">{pct(contracts / stake)}</b> of your stake into contracts ({usd(contracts)}) and keeps the rest as
-                cash. Higher weight, bigger gap, bigger bet: and a bigger loss if your view is wrong.
+                The Kelly rule puts <b className="tnum text-inkstone">{pct(contracts / stake)}</b> of your amount into contracts ({usd(contracts)}); the rest isn&apos;t
+                used. Follow your view more closely and the gap grows, so it puts in more: and loses more if your view is wrong.
               </li>
             </ul>
           </div>

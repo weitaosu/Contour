@@ -7,10 +7,10 @@ import { useAnchorWallet, useConnection, useWallet } from "@solana/wallet-adapte
 import { Transaction } from "@solana/web3.js";
 import { Dialog } from "radix-ui";
 import { Check, X } from "lucide-react";
-import type { Ladder, Quote } from "@contour/core";
+import { escrowTerms, type Ladder, type Quote } from "@contour/core";
 import { desk, type StoredQuote } from "@/lib/desk";
 import { openPositionIx, sendTx, useChainConfig, useDeskConfig, useProgram, useUsdcBalance, useUsdcMint } from "@/lib/chain";
-import { pct, settleLabel, usd } from "@/lib/format";
+import { notableUnused, pct, settleLabel, usd } from "@/lib/format";
 import { isWin, runs, whenPhrase } from "@/lib/outcomes";
 import { WalletDialog } from "@/components/WalletButton";
 
@@ -56,6 +56,11 @@ export function ReviewDialog({
   const zones = runs(wins, (w) => w);
   const chance = ladder.marketProb.reduce((s, p, j) => s + (wins[j] ? p : 0), 0);
   const [ack, setAck] = useState(false);
+  // Only what's at risk is escrowed: the quote's unused part is never charged, and every payout drops
+  // by the same amount, so profit and loss are unchanged. The desk's quote is what gets signed.
+  const kept = (server ? Number(server.keptBaseUnits ?? 0) : escrowTerms(quote).keptBase) / 1e6;
+  const pay = server ? Number(server.stakeBaseUnits) / 1e6 : stake - kept;
+  const keeps = notableUnused(kept);
 
   return (
     <Dialog.Root
@@ -87,7 +92,7 @@ export function ReviewDialog({
                 You make money <span className="text-signal-violet">{whenPhrase(ladder, zones)}</span>.
               </>
             ) : (
-              <>At this confidence your money barely moves.</>
+              <>At this setting your money barely moves.</>
             )}
           </Dialog.Description>
 
@@ -101,17 +106,32 @@ export function ReviewDialog({
                 </span>
               ))}
             />
-            {confidence !== null && <Row label="Confidence" value={pct(confidence)} />}
-            <Row label="You pay" value={usd(stake)} strong />
+            {confidence !== null && <Row label="Follows your view" value={confidence >= 1 ? "100% · full match" : `${pct(confidence)} · safer`} />}
             <Row
-              label="What it buys"
+              label="You pay"
               value={
                 <>
-                  {usd(quote.legs.reduce((a, l) => a + l.usd, 0))} of contracts <span className="text-slate">· {usd(quote.cashUsd)} kept as cash</span>
+                  {usd(pay)}
+                  {keeps && <span className="font-normal text-slate"> · of your {usd(stake)}</span>}
                 </>
               }
+              strong
             />
+            <Row label="What it buys" value={<>{usd(quote.legs.reduce((a, l) => a + l.usd, 0))} of contracts</>} />
             <Row label="Gemini fees" value={<>{usd(quote.feesUsd)} <span className="text-slate">· included above</span></>} />
+            {keeps && (
+              <Row
+                label="Not needed"
+                value={
+                  <>
+                    {usd(kept)}{" "}
+                    <span className="text-slate">
+                      · {confidence !== null && confidence < 1 ? `following your view at ${pct(confidence)} puts in less` : "the closest match to your view uses less"}
+                    </span>
+                  </>
+                }
+              />
+            )}
             {protection ? (
               <>
                 {protection.floor && (
@@ -156,7 +176,7 @@ export function ReviewDialog({
                   value={
                     <>
                       <span className="font-bold text-gain">+{dollars(quote.maxPayout - stake)}</span>{" "}
-                      <span className="text-slate">· you get {usd(quote.maxPayout)}</span>
+                      <span className="text-slate">· {usd(quote.maxPayout - kept)} paid out</span>
                     </>
                   }
                 />
@@ -164,7 +184,7 @@ export function ReviewDialog({
                   label="Worst case"
                   value={
                     <>
-                      <span className="font-bold">−{dollars(stake - quote.minPayout)}</span> <span className="text-slate">· you keep {usd(quote.minPayout)}</span>
+                      <span className="font-bold">−{dollars(stake - quote.minPayout)}</span> <span className="text-slate">· {usd(quote.minPayout - kept)} paid back</span>
                     </>
                   }
                 />
@@ -176,7 +196,10 @@ export function ReviewDialog({
           <div className="mt-6 border-t border-mist pt-5">
             <p className="stat-label">When you confirm</p>
             <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
-              <Step n={1}>Your wallet signs one transaction that locks {usd(stake)} and this exact payout schedule on Solana.</Step>
+              <Step n={1}>
+                Your wallet signs one transaction that locks {usd(pay)} and this exact payout schedule on Solana.
+                {keeps && <> The other {usd(kept)} isn&apos;t used.</>}
+              </Step>
               <Step n={2}>
                 The desk buys {quote.legs.length} {quote.legs.length === 1 ? "contract" : "contracts"} to back it. If it doesn&apos;t accept within minutes, you can cancel for a full
                 refund.
@@ -203,13 +226,14 @@ export function ReviewDialog({
                 </>
               ) : (
                 <>
-                  I understand I could get back as little as <b className="tnum">{usd(quote.minPayout)}</b> of my {usd(stake)}.
+                  I understand I could lose up to <b className="tnum">{usd(stake - quote.minPayout)}</b>
+                  {stake - quote.minPayout < pay - 0.005 ? <>, getting back as little as {usd(quote.minPayout - kept)} of the {usd(pay)} I pay</> : <>, everything I pay</>}.
                 </>
               )}
             </span>
           </label>
 
-          <ConfirmBlock ladder={ladder} server={server} stake={stake} quoteErr={quoteErr} age={age} ack={ack} />
+          <ConfirmBlock ladder={ladder} server={server} stake={pay} quoteErr={quoteErr} age={age} ack={ack} />
           <Dialog.Close className="btn btn-quiet btn-block mt-3">Back to edit</Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>

@@ -11,10 +11,10 @@ import { Check, CircleDot, Clock, Coins, Lock, ShieldCheck, ArrowUpRight } from 
 import { desk, type PositionView } from "@/lib/desk";
 import { explorerTx } from "@/lib/env";
 import { sendTx, useChainConfig, useProgram, useUsdcMint } from "@/lib/chain";
-import { cents, pct, qty, settleLabel, short, signed, untilLabel, usd } from "@/lib/format";
+import { cents, notableUnused, pct, qty, settleLabel, short, signed, untilLabel, usd } from "@/lib/format";
 import { ProfitChart, GAIN } from "@/components/charts/ProfitChart";
-import { MoneySplit, oneIn, Tile } from "@/components/forecast/ProfitCard";
-import { isWin, runs, whenPhrase } from "@/lib/outcomes";
+import { oneIn, Tile } from "@/components/forecast/ProfitCard";
+import { isWin } from "@/lib/outcomes";
 import type { Ladder } from "@contour/core";
 
 
@@ -208,10 +208,10 @@ export function PositionScreen({ pubkey }: { pubkey: string }) {
       {quote && (
         <AsQuoted
           quote={quote.quote}
-          stake={stake}
+          stake={quote.quote.stakeBase / 1e6}
+          kept={Number(quote.keptBaseUnits ?? 0) / 1e6}
           marketProb={quote.marketProb}
           belief={quote.preimage?.belief ?? null}
-          ladder={ladderQ.data?.ladder && ladderQ.data.ladder.bucketLabels.length === quote.marketProb.length ? ladderQ.data.ladder : null}
         />
       )}
 
@@ -325,18 +325,18 @@ function LockedSchedule({
 function AsQuoted({
   quote,
   stake,
+  kept,
   marketProb,
   belief,
-  ladder,
 }: {
   quote: Omit<import("@contour/core").Quote, "raw">;
+  /** The whole amount the view was sized for; `kept` of it wasn't needed and wasn't charged (0 on older positions, which escrowed it). */
   stake: number;
+  kept: number;
   marketProb: number[];
   belief: number[] | null;
-  ladder: Ladder | null;
 }) {
   const wins = quote.payoutByBucket.map((p) => isWin(p, stake));
-  const zones = runs(wins, (w) => w);
   const chance = marketProb.reduce((s, q, j) => s + (wins[j] ? q : 0), 0);
   const chanceYou = belief ? belief.reduce((s, q, j) => s + (wins[j] ? q : 0), 0) : null;
   return (
@@ -348,11 +348,15 @@ function AsQuoted({
       <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
         <Tile
           label="You paid"
-          value={usd(stake)}
-          sub={quote.feesUsd === undefined ? "quoted before Gemini fees were itemized" : `${usd(quote.feesUsd)} of it in Gemini fees`}
+          value={usd(stake - kept)}
+          sub={
+            quote.feesUsd === undefined
+              ? "quoted before Gemini fees were itemized"
+              : `${usd(quote.feesUsd)} of it in Gemini fees${notableUnused(kept) ? ` · ${usd(kept)} of your ${usd(stake, 0)} wasn't needed` : ""}`
+          }
         />
-        <Tile label="Really at risk" value={usd(stake - quote.minPayout)} sub={`you keep at least ${usd(quote.minPayout)}`} />
-        <Tile label="Best case" value={<span className="text-gain">+{usd(quote.maxPayout - stake)}</span>} sub={`you get ${usd(quote.maxPayout)}`} />
+        <Tile label="Really at risk" value={usd(stake - quote.minPayout)} sub={`at least ${usd(quote.minPayout - kept)} paid back`} />
+        <Tile label="Best case" value={<span className="text-gain">+{usd(quote.maxPayout - stake)}</span>} sub={`${usd(quote.maxPayout - kept)} paid out`} />
         <Tile
           label="Chance of profit"
           value={pct(chance)}
@@ -369,7 +373,6 @@ function AsQuoted({
           }
         />
       </div>
-      <MoneySplit quote={quote} stake={stake} winsWhere={ladder && zones.length ? whenPhrase(ladder, zones) : null} chance={chance} title={`Where your ${usd(stake, 0)} went`} />
     </section>
   );
 }

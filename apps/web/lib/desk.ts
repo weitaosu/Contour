@@ -50,8 +50,11 @@ export interface StoredQuote {
   title?: string;
   forecastHash: string;
   marketIdHex: string;
+  /** What goes on-chain: the escrowed stake and payouts, without the quote's cash. */
   scheduleBaseUnits: string[];
   stakeBaseUnits: string;
+  /** The quote's cash, which stays in the wallet (absent on quotes from before it stopped being escrowed). */
+  keptBaseUnits?: string;
   expiryTs: number;
   validUntil: number;
   capturedAt: string;

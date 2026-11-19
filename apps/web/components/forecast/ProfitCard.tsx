@@ -6,7 +6,7 @@ import { GAIN, ProfitChart } from "@/components/charts/ProfitChart";
 import { OutcomeBars } from "@/components/charts/OutcomeBars";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { ifItLands, isWin, rangeShort, runs, whenPhrase } from "@/lib/outcomes";
-import { pct, usd } from "@/lib/format";
+import { notableUnused, pct, usd } from "@/lib/format";
 import { Fill } from "./Panel";
 
 const dollars = (n: number) => usd(n, Math.abs(n) >= 100 ? 0 : 2);
@@ -43,7 +43,7 @@ export const ProfitSummary = memo(function ProfitSummary({
   ladder: Ladder;
   quote: Omit<Quote, "raw">;
   stake: number;
-  /** Whether there's a view behind the position (spreads have none), for the "trust your view more" tip. */
+  /** Whether the view could be followed more closely (not a spread, not already 100%), for the tip. */
   hasView: boolean;
   hover: number | null;
   onHover: (j: number | null) => void;
@@ -97,7 +97,7 @@ export const ProfitSummary = memo(function ProfitSummary({
         {status?.detail ? (
           <div className="mt-0.5 text-[13.5px] text-slate">{status.detail}</div>
         ) : (
-          small && hasView && <p className="mt-0.5 text-[13.5px] text-slate">Trust your view more under Confidence for a bigger swing either way.</p>
+          small && hasView && <p className="mt-0.5 text-[13.5px] text-slate">Follow your view more closely for a bigger swing either way.</p>
         )}
         {note && <p className="mt-1 text-[14px] text-slate">{note}</p>}
       </div>
@@ -238,35 +238,6 @@ export const KeyNumbers = memo(function KeyNumbers({
 });
 
 /** "If the market's odds are right": the average outcome, and what fees and spreads cost. */
-export const EvNote = memo(function EvNote({ quote, stake, compact = false }: { quote: Omit<Quote, "raw">; stake: number; compact?: boolean }) {
-  const ev = quote.evUnderMarket;
-  if (compact)
-    return (
-      <p className="text-[13px] leading-snug text-slate" title="The gap to what you put in is Gemini's fees and buying at the asking price: the cost of trading on your view.">
-        Average back if the market&apos;s right: <span className="tnum font-bold text-inkstone">{usd(ev)}</span>
-      </p>
-    );
-  return (
-    <p className="text-[14px] text-slate">
-      If the market&apos;s odds are right, you&apos;d get back <span className="tnum font-bold text-inkstone">{usd(ev)}</span> on average
-      {stake - ev > 0.005 ? (
-        <>
-          , <span className="tnum">{usd(stake - ev)}</span> less than you put in: <span className="tnum">{usd(quote.feesUsd)}</span> in Gemini fees
-          {stake - ev - quote.feesUsd > 0.005 ? (
-            <>
-              {" "}
-              and <span className="tnum">{usd(stake - ev - quote.feesUsd)}</span> from buying at the asking price
-            </>
-          ) : null}
-          . That&apos;s the cost of trading on your view.
-        </>
-      ) : (
-        "."
-      )}
-    </p>
-  );
-});
-
 /** "1 in 6": chances people can picture. */
 export function oneIn(p: number) {
   if (!(p > 0)) return "never";
@@ -275,86 +246,71 @@ export function oneIn(p: number) {
 }
 
 /**
- * Where the stake actually goes. A $10 position is not a $10 bet: most of it can sit as cash, and
- * only the contracts plus fees are at risk. Showing the split keeps "risk $1 to make $5" honest.
+ * What to expect: the average result if your view is right, and if the market's is (the cost of
+ * trading), plus how much of the amount the closest match to the view actually uses.
  */
-export const MoneySplit = memo(function MoneySplit({
+export const Expectation = memo(function Expectation({
   quote,
   stake,
-  winsWhere,
-  chance,
-  title,
-  bare = false,
-  compact = false,
+  used,
+  hasView,
+  confidence,
 }: {
   quote: Omit<Quote, "raw">;
+  /** The amount the user set. */
   stake: number;
-  winsWhere: string | null;
-  chance: number;
-  title?: string;
-  /** Without its own box and title, for a tab or panel that already frames it. */
-  bare?: boolean;
-  /** One short sentence instead of the full explanation, for the one-screen workspace. */
-  compact?: boolean;
+  /** What the position actually takes from it (the rest isn't needed). */
+  used: number;
+  /** Spreads carry no view of their own, so there's no "if your view is right" line. */
+  hasView: boolean;
+  /** How closely the view is followed (null when there's no view): below 1 it puts in less on purpose. */
+  confidence: number | null;
 }) {
-  const contracts = quote.legs.reduce((a, l) => a + l.usd, 0);
-  // Quotes stored before fees were modeled have no fee fields: treat them as zero rather than NaN.
-  const fees = quote.feesUsd ?? 0;
-  const cash = quote.cashUsd;
-  const atRisk = stake - quote.minPayout;
-  const share = (x: number) => `${Math.max(0, (x / stake) * 100)}%`;
-  const nContracts = quote.legs.reduce((a, l) => a + l.qty, 0);
+  if (!quote.legs.length) return <p className="text-[13.5px] leading-snug text-slate">Nothing to buy at this view yet, so nothing is used.</p>;
+  const ifYou = quote.evUnderBelief - stake;
+  const ifMarket = quote.evUnderMarket - stake;
+  const spread = Math.max(0, -ifMarket - quote.feesUsd);
+  const rows: [string, React.ReactNode, React.ReactNode][] = [
+    ...(hasView
+      ? [
+          [
+            "If your view is right",
+            <span key="v" className={ifYou > 0.005 ? "text-gain" : ""}>
+              {signedUsd(ifYou)}
+            </span>,
+            "on average, by your odds",
+          ] as [string, React.ReactNode, React.ReactNode],
+        ]
+      : []),
+    [
+      "If the market is right",
+      signedUsd(ifMarket),
+      <>
+        {usd(quote.feesUsd)} Gemini fees{spread >= 0.005 ? <> + {usd(spread)} paying the ask</> : null}
+      </>,
+    ],
+    ["Amount used", usd(used), notableUnused(stake - used)
+        ? confidence !== null && confidence < 1
+          ? `of your ${usd(stake, 0)}: following your view at ${pct(confidence)} puts in less`
+          : `of your ${usd(stake, 0)}: the closest match to your view needs no more`
+        : `all of your ${usd(stake, 0)}`,
+    ],
+  ];
   return (
-    <div className={bare ? "" : "rounded-[20px] bg-porcelain px-5 py-5 md:px-6"}>
-      {!bare && <p className="stat-label">{title ?? `Where your ${usd(stake, 0)} goes`}</p>}
-      <div className={`${bare ? "" : "mt-3 "}flex ${compact ? "h-3" : "h-4"} w-full overflow-hidden rounded-full bg-mist`} role="img" aria-label={`${usd(contracts)} contracts, ${usd(fees)} fees, ${usd(cash)} cash`}>
-        <span className="h-full bg-signal-violet" style={{ width: share(contracts), transition: "width 420ms cubic-bezier(.2,.8,.2,1)" }} />
-        <span className="h-full bg-slate" style={{ width: share(fees), minWidth: fees > 0 ? 3 : 0, transition: "width 420ms cubic-bezier(.2,.8,.2,1)" }} />
-      </div>
-      <dl className={`grid grid-cols-3 gap-3 ${compact ? "mt-2.5 text-[13.5px]" : "mt-3 text-[14px]"}`}>
-        <div>
-          <dt className="flex items-center gap-1.5 text-slate">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-signal-violet" /> Contracts
+    <dl className="grid grid-cols-[1fr_auto] gap-x-4 gap-y-2.5 text-[13.5px]">
+      {rows.map(([label, value, sub]) => (
+        <div key={label} className="contents">
+          <dt className="min-w-0 leading-snug">
+            <span className="block text-inkstone">{label}</span>
+            <span className="block text-[12.5px] text-slate">{sub}</span>
           </dt>
-          <dd className="tnum font-bold text-inkstone">{usd(contracts)}</dd>
+          <dd className="tnum text-right text-[17px] font-bold leading-tight text-inkstone">{value}</dd>
         </div>
-        <div>
-          <dt className="flex items-center gap-1.5 text-slate">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-slate" /> {compact ? "Fees" : "Gemini fees"}
-          </dt>
-          <dd className="tnum font-bold text-inkstone">{quote.feesUsd === undefined ? "not itemized" : usd(fees)}</dd>
-        </div>
-        <div>
-          <dt className="flex items-center gap-1.5 text-slate">
-            <span className="h-2.5 w-2.5 shrink-0 rounded-full bg-mist ring-1 ring-ash" /> {compact ? "Cash" : "Kept as cash"}
-          </dt>
-          <dd className="tnum font-bold text-inkstone">{usd(cash)}</dd>
-        </div>
-      </dl>
-      {compact ? (
-        <p className="mt-2.5 text-[13.5px] leading-snug text-inkstone">
-          {quote.legs.length === 0 ? (
-            <>Nothing at risk yet: no contract is worth its price at this view.</>
-          ) : (
-            <>
-              Only <b className="tnum">{usd(atRisk)}</b> is at risk, a bet that wins <b className="tnum">{oneIn(chance)}</b> times; the cash comes back regardless.
-            </>
-          )}
-        </p>
-      ) : quote.legs.length === 0 ? (
-        <p className="mt-3 text-[14px] leading-relaxed text-inkstone">
-          Nothing is at risk yet: at this view no contract is worth its price, so all <b className="tnum">{usd(cash)}</b> would stay as cash.
-        </p>
-      ) : (
-        <p className="mt-3 text-[14px] leading-relaxed text-inkstone">
-          Only <b className="tnum">{usd(atRisk)}</b> is really at risk. The contracts {winsWhere ? <>pay $1 each {winsWhere}</> : <>pay $1 each in their outcomes</>}
-          {nContracts > 0 ? <> ({nContracts.toLocaleString("en-US", { maximumFractionDigits: 2 })} in total)</> : null}; the {usd(cash)} in cash comes back to you whatever happens. So this is
-          a <b className="tnum">{usd(atRisk)}</b> bet that wins <b className="tnum">{oneIn(chance)}</b> times by the market&apos;s odds.
-        </p>
-      )}
-    </div>
+      ))}
+    </dl>
   );
 });
+
 
 export function Tile({ label, value, sub, compact = false }: { label: string; value: React.ReactNode; sub: React.ReactNode; compact?: boolean }) {
   return (

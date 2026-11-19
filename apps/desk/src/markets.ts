@@ -1,5 +1,6 @@
 import {
   compile,
+  escrowTerms,
   formatValue,
   fromMarket,
   marketMoments,
@@ -224,7 +225,7 @@ export class MarketService {
           const r = (v: number) => (Math.abs(v) >= 1000 ? Math.round(v) : Math.round(v * 100) / 100);
           readout = { center: formatValue(r(mm.mean), l.unit), spread: formatValue(r(mm.sd), l.unit), leader: null, leaderProb: null };
           const belief = fromMarket(l, 0, 0.6);
-          const q = compile({ ladder: l, belief, confidence: 0.5, stakeUsd: 100, maxIter: 8_000 });
+          const q = compile({ ladder: l, belief, confidence: 1, stakeUsd: 100, maxIter: 8_000 });
           teaser = { belief, worst: q.minPayout, best: q.maxPayout, probProfitYou: q.probProfitBelief, payouts: q.payoutByBucket, trade: q.advice === "trade" };
         } else {
           const order = l.marketProb.map((p, i) => [p, i] as const).sort((a, b) => b[0] - a[0]);
@@ -452,8 +453,11 @@ export interface StoredQuote {
   title: string;
   forecastHash: string;
   marketIdHex: string;
+  /** The on-chain schedule and stake: what the escrow holds, without the quote's cash (see escrowTerms). */
   scheduleBaseUnits: string[];
   stakeBaseUnits: string;
+  /** The quote's cash, which stays in the owner's wallet. Absent on quotes made before it stopped being escrowed. */
+  keptBaseUnits?: string;
   expiryTs: number;
   validUntil: number;
   capturedAt: string;
@@ -510,6 +514,11 @@ export async function makeQuote(markets: MarketService, db: DB, req: QuoteReques
       quote = compile({ ladder, belief: req.belief, confidence: req.confidence, stakeUsd: req.stakeUsd, depth, warmStart: quote.raw.weights, shape: req.shape });
     }
   }
+  // The cash comes back in every outcome, so it stays in the wallet: only what's at risk is escrowed.
+  const escrow = escrowTerms(quote);
+  if (escrow.stakeBase <= 0) {
+    throw Object.assign(new Error("No contract is worth its price at this view, so there's nothing to put at risk."), { statusCode: 422 });
+  }
   const quoteId = randomUUID();
   // Strategies built straight from contracts record their settings in the hashed preimage and carry
   // no view (belief = market). Absent keys are skipped by the canonical hash.
@@ -535,8 +544,9 @@ export async function makeQuote(markets: MarketService, db: DB, req: QuoteReques
     title: ladder.title,
     forecastHash: hash,
     marketIdHex: marketIdHex(ladder.eventTicker),
-    scheduleBaseUnits: quote.scheduleBase.map(String),
-    stakeBaseUnits: String(quote.stakeBase),
+    scheduleBaseUnits: escrow.scheduleBase.map(String),
+    stakeBaseUnits: String(escrow.stakeBase),
+    keptBaseUnits: String(escrow.keptBase),
     expiryTs,
     validUntil: now + config.quoteTtlMs,
     capturedAt,
