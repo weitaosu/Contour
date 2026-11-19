@@ -25,4 +25,9 @@ export const config = {
   quicknodeToken: process.env.QUICKNODE_STREAM_TOKEN ?? "",
   faucetEnabled: (process.env.FAUCET_ENABLED ?? "true") === "true",
   schedulerEnabled: (process.env.SCHEDULER_ENABLED ?? "true") === "true",
+  /**
+   * Demo direct-payment mode: when set, the app sends the buyer's USDC straight to this wallet when
+   * they pay, instead of opening an escrow. Unset = the escrow flow.
+   */
+  payTo: process.env.PAY_TO ?? "",
 };

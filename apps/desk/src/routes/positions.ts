@@ -59,7 +59,7 @@ export function registerPositionRoutes(app: FastifyInstance, ctx: Ctx) {
           ? (ctx.db.prepare("SELECT quote_json FROM quotes WHERE id = ?").get(r.quote_id as string) as { quote_json: string } | undefined)
           : undefined;
         const parsed = q ? JSON.parse(q.quote_json) : null;
-        return { ...r, title: parsed?.ticker ?? r.ticker, bucketLabels: parsed?.bucketLabels ?? null };
+        return { ...r, title: parsed?.title ?? parsed?.ticker ?? r.ticker, bucketLabels: parsed?.bucketLabels ?? null };
       }),
       summary: {
         count: rows.length,

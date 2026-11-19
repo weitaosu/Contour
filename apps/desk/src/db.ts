@@ -10,6 +10,9 @@ export function openDb(path = process.env.DB_PATH ?? resolve(process.cwd(), "../
   db.pragma("journal_mode = WAL");
   db.pragma("busy_timeout = 5000");
   migrate(db);
+  // Direct-payment positions (see recordDirectPayment) name the wallet that was paid.
+  const cols = db.prepare("PRAGMA table_info(positions)").all() as { name: string }[];
+  if (!cols.some((c) => c.name === "pay_to")) db.exec("ALTER TABLE positions ADD COLUMN pay_to TEXT");
   return db;
 }
 

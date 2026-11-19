@@ -687,7 +687,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
   return (
     <div className="mx-auto flex w-full max-w-[1680px] flex-col gap-2 px-4 pb-28 pt-2 md:px-6 lg:min-h-[calc(100dvh-73px)] lg:pb-3">
       {/* Phone order bar: always one tap from the next step, like a brokerage app's trade button. */}
-      <div className="fixed inset-x-3 bottom-3 z-20 flex items-center justify-between gap-3 rounded-full bg-inkstone py-2 pl-5 pr-2 text-porcelain shadow-xl lg:hidden">
+      <div className="fixed inset-x-3 bottom-3 z-20 flex items-center justify-between gap-3 on-night rounded-full bg-night py-2 pl-5 pr-2 text-porcelain shadow-xl ring-1 ring-mist lg:hidden">
         {tradable ? (
           <>
             <span className="tnum min-w-0 text-[14px] leading-tight">

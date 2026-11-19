@@ -33,7 +33,7 @@ export const LegsTable = memo(function LegsTable({ quote, paper, crossed, compac
             ))}
             <tr className="border-t border-mist">
               <td className="py-[2px]" colSpan={2}>
-                <b>Escrowed</b>{" "}
+                <b>You pay</b>{" "}
                 <span className="text-slate">
                   incl. {usd(quote.feesUsd)} fees{notableUnused(quote.cashUsd) ? <> · {usd(quote.cashUsd)} not needed</> : null}
                 </span>

@@ -13,7 +13,7 @@ import { registerReplayRoutes } from "./routes/replay";
 import { registerHookRoutes } from "./routes/hooks";
 import { getChain } from "./chain";
 import { makeExecutor } from "./executor";
-import { handleStreamTx, runScheduler, type HandlerCtx } from "./handler";
+import { handleStreamTx, recordDirectPayment, runScheduler, type HandlerCtx } from "./handler";
 import { PublicKey } from "@solana/web3.js";
 import { configPda } from "@contour/chain";
 
@@ -53,6 +53,8 @@ export async function buildServer() {
     cluster: "devnet",
     faucetEnabled: config.faucetEnabled && !!chain?.mintAuthority,
     desk: chain?.desk.publicKey.toBase58() ?? null,
+    // Demo direct-payment mode: buyers send USDC straight to this wallet instead of an escrow.
+    payTo: config.payTo || null,
   }));
 
   app.get("/markets", async (req) => {
@@ -100,6 +102,18 @@ export async function buildServer() {
   });
 
   registerPositionRoutes(app, { db, hub, markets });
+
+  // Direct-payment mode: the app reports a payment it just sent to PAY_TO; the desk checks it on-chain
+  // and saves it as a position (Record page, position page, simulated hedge).
+  app.post("/payments", async (req, reply) => {
+    const body = z.object({ signature: z.string().min(64).max(100), forecastHash: z.string().regex(/^[0-9a-f]{64}$/), owner: z.string().min(32).max(64) }).parse(req.body);
+    try {
+      return { position: await recordDirectPayment(ctx, body) };
+    } catch (err) {
+      const e = err as Error & { statusCode?: number };
+      return reply.status(e.statusCode ?? 500).send({ error: e.message });
+    }
+  });
   registerReplayRoutes(app, { db });
   registerHookRoutes(app, ctx);
 
@@ -129,23 +143,28 @@ export async function buildServer() {
     }
   }
 
-  if (chain && config.schedulerEnabled) {
-    let grace = 86_400;
-    chain.deskProgram.account.config
-      .fetch(configPda())
-      .then((c) => (grace = Number(c.settleGraceSecs.toString())))
-      .catch((e) => app.log.warn(`[scheduler] config not readable yet: ${e.message}`));
-    let running = false;
-    setInterval(async () => {
-      if (running) return;
-      running = true;
-      try {
-        await runScheduler(ctx, grace);
-      } finally {
-        running = false;
-      }
-    }, 30_000);
-  }
+  // Settlement is switched off for the demo: it only runs once a market settles, which is hard to show
+  // live. runScheduler (handler.ts) still settles or unwinds Active positions past expiry; uncomment
+  // this block to turn it back on.
+  // if (chain && config.schedulerEnabled) {
+  //   let grace = 86_400;
+  //   chain.deskProgram.account.config
+  //     .fetch(configPda())
+  //     .then((c) => (grace = Number(c.settleGraceSecs.toString())))
+  //     .catch((e) => app.log.warn(`[scheduler] config not readable yet: ${e.message}`));
+  //   let running = false;
+  //   setInterval(async () => {
+  //     if (running) return;
+  //     running = true;
+  //     try {
+  //       await runScheduler(ctx, grace);
+  //     } finally {
+  //       running = false;
+  //     }
+  //   }, 30_000);
+  // }
+  void runScheduler;
+  void configPda;
 
   if (config.recorderEnabled) startRecorder(db, gemini);
   // Warm the market list.

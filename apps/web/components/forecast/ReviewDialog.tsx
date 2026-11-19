@@ -4,13 +4,16 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAnchorWallet, useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { Transaction } from "@solana/web3.js";
+import { PublicKey, Transaction } from "@solana/web3.js";
+import { createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from "@solana/spl-token";
+import { ata } from "@contour/chain";
 import { Dialog } from "radix-ui";
 import { Check, X } from "lucide-react";
 import { escrowTerms, type Ladder, type Quote } from "@contour/core";
 import { desk, type StoredQuote } from "@/lib/desk";
 import { openPositionIx, sendTx, useChainConfig, useDeskConfig, useProgram, useUsdcBalance, useUsdcMint } from "@/lib/chain";
-import { notableUnused, pct, settleLabel, usd } from "@/lib/format";
+import { notableUnused, pct, settleLabel, short, usd } from "@/lib/format";
+import { explorerTx } from "@/lib/env";
 import { isWin, runs, whenPhrase } from "@/lib/outcomes";
 import { WalletDialog } from "@/components/WalletButton";
 
@@ -56,6 +59,8 @@ export function ReviewDialog({
   const zones = runs(wins, (w) => w);
   const chance = ladder.marketProb.reduce((s, p, j) => s + (wins[j] ? p : 0), 0);
   const [ack, setAck] = useState(false);
+  // Direct-payment mode: the USDC goes straight to this wallet instead of an escrow.
+  const payTo = useDeskConfig().data?.payTo ?? null;
   // Only what's at risk is escrowed: the quote's unused part is never charged, and every payout drops
   // by the same amount, so profit and loss are unchanged. The desk's quote is what gets signed.
   const kept = (server ? Number(server.keptBaseUnits ?? 0) : escrowTerms(quote).keptBase) / 1e6;
@@ -71,7 +76,7 @@ export function ReviewDialog({
       }}
     >
       <Dialog.Portal>
-        <Dialog.Overlay className="fade-in fixed inset-0 z-40 bg-inkstone/40" />
+        <Dialog.Overlay className="fade-in fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]" />
         <Dialog.Content className="fade-up fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto rounded-t-[32px] bg-porcelain px-6 pb-8 pt-6 md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:w-[min(560px,calc(100vw-32px))] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[36px] md:p-8">
           <div className="flex items-start justify-between gap-4">
             <div className="min-w-0">
@@ -195,6 +200,14 @@ export function ReviewDialog({
 
           <div className="mt-6 border-t border-mist pt-5">
             <p className="stat-label">When you confirm</p>
+            {payTo ? (
+              <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
+                <Step n={1}>
+                  Your wallet signs one transaction that sends {usd(pay)} USDC straight to Contour&apos;s account <span className="tnum font-bold">{short(payTo, 4)}</span>.
+                  {keeps && <> The other {usd(kept)} isn&apos;t used.</>}
+                </Step>
+              </ol>
+            ) : (
             <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
               <Step n={1}>
                 Your wallet signs one transaction that locks {usd(pay)} and this exact payout schedule on Solana.
@@ -206,6 +219,7 @@ export function ReviewDialog({
               </Step>
               <Step n={3}>When the market settles, you&apos;re paid by the schedule automatically. Nothing to sell, nothing to watch.</Step>
             </ol>
+            )}
           </div>
 
           <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-[16px] border border-mist px-4 py-3 text-[15px] text-inkstone hover:border-ash">
@@ -233,7 +247,7 @@ export function ReviewDialog({
             </span>
           </label>
 
-          <ConfirmBlock ladder={ladder} server={server} stake={pay} quoteErr={quoteErr} age={age} ack={ack} />
+          <ConfirmBlock ladder={ladder} server={server} stake={pay} payTo={payTo} quoteErr={quoteErr} age={age} ack={ack} />
           <Dialog.Close className="btn btn-quiet btn-block mt-3">Back to edit</Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>
@@ -270,7 +284,24 @@ function paymentError(e: Error): string {
   return `The payment didn't go through: ${m.slice(0, 200)}`;
 }
 
-function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: Ladder; server: StoredQuote | null; stake: number; quoteErr: string | null; age: number | null; ack: boolean }) {
+function ConfirmBlock({
+  ladder,
+  server,
+  stake,
+  payTo,
+  quoteErr,
+  age,
+  ack,
+}: {
+  ladder: Ladder;
+  server: StoredQuote | null;
+  stake: number;
+  /** Demo direct-payment mode: send the USDC straight to this wallet instead of opening an escrow. */
+  payTo: string | null;
+  quoteErr: string | null;
+  age: number | null;
+  ack: boolean;
+}) {
   const router = useRouter();
   const qc = useQueryClient();
   const { connection } = useConnection();
@@ -284,9 +315,12 @@ function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: L
   const [dialog, setDialog] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
+  // Set only if the payment went through but couldn't be saved as a position (shown instead of the button).
+  const [paid, setPaid] = useState<{ sig: string; amount: number; to: string; problem: string } | null>(null);
 
-  const deployed = !!chainCfg.data && !!mint;
-  const short = bal.data !== undefined && bal.data < stake;
+  // Direct payment needs only the USDC mint; the escrow flow also needs the program deployed.
+  const deployed = payTo ? !!mint : !!chainCfg.data && !!mint;
+  const lacking = bal.data !== undefined && bal.data < stake;
 
   async function faucet() {
     if (!publicKey) return;
@@ -298,6 +332,40 @@ function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: L
     } catch (e) {
       setErr((e as Error).message);
     } finally {
+      setBusy(null);
+    }
+  }
+
+  /** Demo direct payment: one USDC transfer from the buyer straight to `payTo`. */
+  async function payDirect() {
+    if (!publicKey || !anchorWallet || !mint || !server || !payTo) return;
+    setErr(null);
+    try {
+      setBusy("Waiting for your signature…");
+      const to = new PublicKey(payTo);
+      const from = ata(mint, publicKey);
+      const dest = ata(mint, to);
+      const amount = BigInt(server.stakeBaseUnits);
+      const tx = new Transaction().add(
+        // Creates the receiving USDC account the first time (paid by the buyer); a no-op after that.
+        createAssociatedTokenAccountIdempotentInstruction(publicKey, dest, to, mint),
+        createTransferCheckedInstruction(from, mint, dest, publicKey, amount, 6),
+      );
+      setBusy(`Sending ${usd(Number(amount) / 1e6)} USDC…`);
+      const sig = await sendTx(connection, anchorWallet, tx);
+      await qc.invalidateQueries({ queryKey: ["usdc"] });
+      // Save it as a position (the desk checks the transfer on-chain), then open its page.
+      setBusy("Saving your position…");
+      try {
+        const { position } = await desk.recordPayment({ signature: sig, forecastHash: server.forecastHash, owner: publicKey.toBase58() });
+        await qc.invalidateQueries({ queryKey: ["record"] });
+        router.push(`/p/${position}`);
+      } catch (e) {
+        setPaid({ sig, amount: Number(amount) / 1e6, to: payTo, problem: (e as Error).message });
+        setBusy(null);
+      }
+    } catch (e) {
+      setErr(paymentError(e as Error));
       setBusy(null);
     }
   }
@@ -327,19 +395,19 @@ function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: L
     }
   }
 
-  let label = `Confirm and sign · ${usd(stake)}`;
-  let action: (() => void) | null = confirm;
+  let label = payTo ? `Confirm and pay · ${usd(stake)}` : `Confirm and sign · ${usd(stake)}`;
+  let action: (() => void) | null = payTo ? payDirect : confirm;
   let disabled = false;
   if (!publicKey) {
     label = "Connect wallet to confirm";
     action = () => setDialog(true);
   } else if (!deployed) {
-    label = "Escrow not deployed yet";
+    label = payTo ? "Test USDC not set up yet" : "Escrow not deployed yet";
     disabled = true;
-  } else if (cfg.data && !cfg.data.desk) {
+  } else if (!payTo && cfg.data && !cfg.data.desk) {
     label = "Desk is not connected to the chain";
     disabled = true;
-  } else if (short) {
+  } else if (lacking) {
     label = "Get test USDC";
     action = cfg.data?.faucetEnabled ? faucet : null;
     disabled = !cfg.data?.faucetEnabled;
@@ -354,6 +422,19 @@ function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: L
     disabled = true;
   }
 
+  if (paid)
+    return (
+      <div className="mt-5 flex flex-col gap-2 rounded-[20px] bg-cloud px-5 py-4 text-[15px] text-inkstone" role="status">
+        <p className="flex items-center gap-2 font-bold">
+          <Check size={18} strokeWidth={3} className="text-gain" aria-hidden="true" /> Paid {usd(paid.amount)} USDC to {short(paid.to, 4)}
+        </p>
+        <p className="text-[14px] text-slate">The transfer is confirmed on Solana, but the desk couldn&apos;t save it as a position: {paid.problem}</p>
+        <a className="link text-[14px] font-bold" href={explorerTx(paid.sig)} target="_blank" rel="noreferrer">
+          View the transaction · {short(paid.sig, 6)}
+        </a>
+      </div>
+    );
+
   return (
     <div className="mt-5 flex flex-col gap-3">
       <button className="btn btn-primary btn-block" disabled={disabled} onClick={() => action?.()}>
@@ -363,7 +444,7 @@ function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: L
         {quoteErr
           ? `Desk quote failed: ${quoteErr}`
           : server
-            ? `Desk quote · ${age}s ago · prices lock when you sign`
+            ? `Desk quote · ${age}s ago${payTo ? "" : " · prices lock when you sign"}`
             : "Preview computed in your browser; desk quote pending."}
         {publicKey && bal.data !== undefined ? ` · Balance ${usd(bal.data)}` : ""}
         {` · Expires ${settleLabel(ladder.expiry)}`}

@@ -9,7 +9,7 @@ import { forecastHash } from "@contour/core";
 import { bytesToHex, cancelPositionIx, readonlyProgram, stateName, unwindPositionIx } from "@contour/chain";
 import { Check, CircleDot, Clock, Coins, Lock, ShieldCheck, ArrowUpRight } from "lucide-react";
 import { desk, type PositionView } from "@/lib/desk";
-import { explorerTx } from "@/lib/env";
+import { explorerAddr, explorerTx } from "@/lib/env";
 import { sendTx, useChainConfig, useProgram, useUsdcMint } from "@/lib/chain";
 import { cents, notableUnused, pct, qty, settleLabel, short, signed, untilLabel, usd } from "@/lib/format";
 import { ProfitChart, GAIN } from "@/components/charts/ProfitChart";
@@ -126,6 +126,8 @@ export function PositionScreen({ pubkey }: { pubkey: string }) {
   const labels = quote?.bucketLabels ?? schedule.map((_, i) => `Bucket ${i + 1}`);
   const fills = view?.fills ?? [];
   const title = quote ? quote.ticker : "Position";
+  // Paid straight to Contour's account (direct-payment mode) rather than escrowed.
+  const payTo = view?.position.pay_to ?? null;
 
   const reached = {
     opened: true,
@@ -159,24 +161,31 @@ export function PositionScreen({ pubkey }: { pubkey: string }) {
         <ol className="grid gap-6 md:grid-cols-5">
           {(state === "cancelled" || state === "unwound"
             ? [STEPS[0], { key: "closed", label: state === "cancelled" ? "Cancelled, stake refunded" : "Unwound, funds returned", icon: Check }]
-            : STEPS
+            : payTo
+              ? STEPS.map((s) => (s.key === "collateral" ? { ...s, label: "Paid to Contour" } : s))
+              : STEPS
           ).map((s, i, arr) => {
             const isDone = (k: string) => k === "closed" || reached[k as keyof typeof reached];
             const done = isDone(s.key);
             const current = !done && arr.slice(0, i).every((x) => isDone(x.key));
             const Icon = s.icon;
             const sig =
-              s.key === "opened" ? view?.position.opened_sig : s.key === "collateral" ? view?.position.accepted_sig : s.key === "settled" ? view?.position.settled_sig : s.key === "closed" ? view?.position.cancelled_sig ?? view?.position.unwound_sig : null;
+              s.key === "opened" ? view?.position.opened_sig : s.key === "collateral" ? (payTo ? null : view?.position.accepted_sig) : s.key === "settled" ? view?.position.settled_sig : s.key === "closed" ? view?.position.cancelled_sig ?? view?.position.unwound_sig : null;
             return (
               <li key={s.key} className="flex items-start gap-3">
-                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${done ? "bg-inkstone text-porcelain" : current ? "bg-signal-violet text-porcelain" : "bg-porcelain text-ash"}`}>
+                <span className={`flex h-10 w-10 shrink-0 items-center justify-center rounded-full ${done ? "bg-inkstone text-porcelain" : current ? "bg-signal-violet text-white" : "bg-porcelain text-ash"}`}>
                   <Icon size={18} strokeWidth={1.75} />
                 </span>
                 <span className="flex flex-col">
                   <span className={`font-bold ${done || current ? "text-inkstone" : "text-smoke"}`}>{s.label}</span>
                   <span className="text-[14px] text-smoke">
-                    {s.key === "awaiting" && expiryTs ? untilLabel(new Date(expiryTs * 1000).toISOString(), now) : null}
+                    {s.key === "awaiting" && expiryTs && state !== "settled" ? untilLabel(new Date(expiryTs * 1000).toISOString(), now) : null}
                     {s.key === "hedged" && fills.length ? `${fills.filter((f) => f.status === "filled").length} of ${fills.length} legs · simulated` : null}
+                    {s.key === "collateral" && payTo ? (
+                      <a className="link inline-flex items-center gap-1" href={explorerAddr(payTo)} target="_blank" rel="noreferrer">
+                        {short(payTo, 4)} <ArrowUpRight size={14} />
+                      </a>
+                    ) : null}
                     {sig ? (
                       <a className="link inline-flex items-center gap-1" href={explorerTx(sig)} target="_blank" rel="noreferrer">
                         {short(sig, 5)} <ArrowUpRight size={14} />
@@ -194,6 +203,7 @@ export function PositionScreen({ pubkey }: { pubkey: string }) {
 
       <div className="mt-6 grid grid-cols-1 items-start gap-6 lg:grid-cols-[minmax(0,1fr)_380px]">
         <LockedSchedule
+          payTo={payTo}
           schedule={schedule}
           stake={stake}
           labels={labels}
@@ -218,7 +228,9 @@ export function PositionScreen({ pubkey }: { pubkey: string }) {
       <section className="mt-6 grid grid-cols-1 gap-6 lg:grid-cols-2">
         <div className="card">
           <h2 className="card-title">Desk hedge</h2>
-          <p className="mt-1 text-[14px] text-slate">The desk buys these legs with its own funds. Your payout comes from the escrow, not from these fills.</p>
+          <p className="mt-1 text-[14px] text-slate">
+            {payTo ? "The desk buys these legs with its own funds to back your position." : "The desk buys these legs with its own funds. Your payout comes from the escrow, not from these fills."}
+          </p>
           {fills.length === 0 ? (
             <p className="mt-6 text-slate">No fills yet.</p>
           ) : (
@@ -255,6 +267,7 @@ export function PositionScreen({ pubkey }: { pubkey: string }) {
 
 /** The on-chain schedule as profit and loss per outcome, with the settled outcome ringed. */
 function LockedSchedule({
+  payTo,
   schedule,
   stake,
   labels,
@@ -263,6 +276,7 @@ function LockedSchedule({
   onHover,
   outcome,
 }: {
+  payTo: string | null;
   schedule: number[];
   stake: number;
   labels: string[];
@@ -280,7 +294,7 @@ function LockedSchedule({
     <section className="card">
       <div className="mb-2 flex flex-wrap items-baseline justify-between gap-2">
         <h2 className="card-title">Locked payout schedule</h2>
-        <span className="text-[14px] text-slate">read from the escrow account</span>
+        <span className="text-[14px] text-slate">{payTo ? "recorded when you paid" : "read from the escrow account"}</span>
       </div>
       <div className="mb-3 min-h-[52px]">
         {focus !== null ? (
@@ -396,7 +410,7 @@ function ScoreCard({ view, chain, outcome, schedule, stake }: { view: PositionVi
           <p className="stat-label">Forecast score</p>
           <p className={`stat-value ${score > 0 ? "text-gain" : ""}`}>{signed(score, 3)}</p>
           <p className="mt-2 text-[14px] text-slate">
-            You gave the outcome <b className="text-inkstone">{pct(pre.belief[outcome], 1)}</b>; the market gave it <b className="text-inkstone">{pct(pre.marketProb[outcome], 1)}</b>. Score = ln(yours ÷ market&apos;s), stored on-chain.
+            You gave the outcome <b className="text-inkstone">{pct(pre.belief[outcome], 1)}</b>; the market gave it <b className="text-inkstone">{pct(pre.marketProb[outcome], 1)}</b>. Score = ln(yours ÷ market&apos;s), {view?.position.pay_to ? "recorded at settlement" : "stored on-chain"}.
           </p>
         </div>
       </section>
@@ -417,7 +431,11 @@ function ScoreCard({ view, chain, outcome, schedule, stake }: { view: PositionVi
         </p>
       </div>
       <div className="border-t border-mist pt-5 text-[14px] text-slate">
-        Your stake and the desk&apos;s collateral sit in escrow: {usd(Math.max(stake, chain?.maxPayout ?? 0))} is already locked for the best case.
+        {view?.position.pay_to ? (
+          <>Paid {usd(stake)} to Contour&apos;s account {short(view.position.pay_to, 4)}. The best case pays {usd(Math.max(...schedule))}.</>
+        ) : (
+          <>Your stake and the desk&apos;s collateral sit in escrow: {usd(Math.max(stake, chain?.maxPayout ?? 0))} is already locked for the best case.</>
+        )}
       </div>
     </section>
   );
@@ -426,17 +444,22 @@ function ScoreCard({ view, chain, outcome, schedule, stake }: { view: PositionVi
 function ForecastProof({ view, chain }: { view: PositionView | null; chain: ChainPosition | null }) {
   const pre = view?.quote?.preimage;
   const computed = useMemo(() => (pre ? forecastHash(pre) : null), [pre]);
-  const ok = computed && chain && computed === chain.forecastHash;
+  // Direct-payment positions have no on-chain account: the hash is the one the desk recorded at payment.
+  const direct = !!view?.position.pay_to;
+  const recorded = chain?.forecastHash ?? (direct ? (view?.position.forecast_hash ?? null) : null);
+  const ok = computed && recorded && computed === recorded;
   return (
     <div className="card">
       <h2 className="card-title">Forecast record</h2>
       <p className="mt-1 text-[14px] text-slate">
-        A hash of your forecast and the market snapshot went on-chain before the outcome existed, so this record cannot be backdated.
+        {direct
+          ? "A hash of your forecast and the market snapshot was recorded when you paid, before the outcome existed."
+          : "A hash of your forecast and the market snapshot went on-chain before the outcome existed, so this record cannot be backdated."}
       </p>
       <div className="mt-5 flex flex-col gap-3 text-[14px]">
         <div className="flex items-center justify-between gap-4">
-          <span className="text-smoke">On-chain hash</span>
-          <span className="tnum truncate font-mono text-inkstone">{chain ? short(chain.forecastHash, 10) : "—"}</span>
+          <span className="text-smoke">{direct ? "Recorded hash" : "On-chain hash"}</span>
+          <span className="tnum truncate font-mono text-inkstone">{recorded ? short(recorded, 10) : "—"}</span>
         </div>
         <div className="flex items-center justify-between gap-4">
           <span className="text-smoke">Recomputed in your browser</span>
@@ -451,7 +474,7 @@ function ForecastProof({ view, chain }: { view: PositionView | null; chain: Chai
             <span className="tag">{pre ? "Waiting for chain data" : "Preimage not available"}</span>
           )}
         </div>
-        {pre && <p className="text-smoke">Confidence {pct(pre.confidence)} · captured {new Date(pre.capturedAt).toLocaleString("en-US")}</p>}
+        {pre && <p className="text-smoke">Follows your view {pct(pre.confidence)} · captured {new Date(pre.capturedAt).toLocaleString("en-US")}</p>}
       </div>
     </div>
   );

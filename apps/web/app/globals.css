@@ -16,8 +16,13 @@
   --color-cloud: #f6f6f6;
   --color-porcelain: #ffffff;
   --color-obsidian: #000000;
+  /* The page itself (behind cards); porcelain is the raised surface on top (tiles, inputs, dialogs). */
+  --color-canvas: #ffffff;
+  /* A surface that stays dark in both themes (footer, phone order bar). */
+  --color-night: #1f1f1f;
   /* Product-data accent allowed by DESIGN.md's stats block, for positive deltas only. */
   --color-gain: #1aab8b;
+  --color-gain-deep: #12846a;
 
   --font-sans: var(--font-inter), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
 
@@ -66,15 +71,47 @@
   --tracking-wide: 0.075em;
 }
 
+/*
+ * Dark theme: the same roles on a cool, faintly violet near-black ladder. The page is the darkest
+ * layer, cards sit a step up and tiles, dialogs and pills a step above that, so raised things read
+ * as raised. Violet and green are lifted to keep their contrast on dark. Set by the theme script in
+ * the layout (data-theme on <html>, from the saved choice or the system setting).
+ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --color-signal-violet: #7c74ff;
+  --color-inkstone: #ededf3;
+  --color-graphite: #d2d2db;
+  --color-slate: #a6a6b4;
+  --color-smoke: #80808e;
+  --color-ash: #4f4f5c;
+  --color-mist: #2a2a34;
+  --color-cloud: #15151b;
+  --color-porcelain: #1e1e26;
+  --color-obsidian: #000000;
+  --color-canvas: #0c0c10;
+  --color-night: #15151b;
+  --color-gain: #2fc79e;
+  --color-gain-deep: #5fe0bd;
+  --shadow-xl: rgba(0, 0, 0, 0.55) 0px 0px 60px -13px;
+}
+/* On a night surface, text and lines keep their light-theme-on-dark values in both themes. */
+.on-night { --color-porcelain: #ffffff; --color-ash: #b0b0b0; --color-smoke: #8c8c96; --color-graphite: #33333c; }
+:root[data-theme="dark"] .on-night { border-top: 1px solid var(--color-mist); }
+/* Switching themes eases every color instead of flashing (see ThemeToggle). */
+.theme-switching, .theme-switching *, .theme-switching *::before, .theme-switching *::after {
+  transition: background-color 320ms ease, color 320ms ease, border-color 320ms ease, fill 320ms ease, stroke 320ms ease, box-shadow 320ms ease !important;
+}
+
 html {
   overflow-x: clip;
-  background: var(--color-porcelain);
+  background: var(--color-canvas);
   color: var(--color-inkstone);
   -webkit-font-smoothing: antialiased;
 }
 
 body {
-  background: var(--color-porcelain);
+  background: var(--color-canvas);
   font-family: var(--font-sans);
   font-weight: 500;
   font-size: 16px;
@@ -118,7 +155,7 @@ text.text-swap { display: inline; }
 .pulse-ring { transform-box: fill-box; transform-origin: center; animation: pulse-ring 1.8s cubic-bezier(.2,.8,.2,1) infinite; }
 /* Live numbers: a brief tint when a price ticks, green up, grey down (the palette has no red). */
 @keyframes tick-up { from { background-color: rgb(26 171 139 / 0.22); } to { background-color: rgb(26 171 139 / 0); } }
-@keyframes tick-down { from { background-color: rgb(31 31 31 / 0.12); } to { background-color: rgb(31 31 31 / 0); } }
+@keyframes tick-down { from { background-color: color-mix(in srgb, var(--color-inkstone) 12%, transparent); } to { background-color: transparent; } }
 .tick-up, .tick-down { border-radius: 6px; box-decoration-break: clone; }
 .tick-up { animation: tick-up 900ms cubic-bezier(.2,.8,.2,1) both; }
 .tick-down { animation: tick-down 900ms cubic-bezier(.2,.8,.2,1) both; }
@@ -157,10 +194,10 @@ text.text-swap { display: inline; }
     transition: transform 160ms cubic-bezier(.2,.8,.2,1), background-color 160ms ease, color 160ms ease, border-color 160ms ease;
   }
   .btn:not(:disabled):active { transform: scale(.97); }
-  .btn-primary { background: var(--color-signal-violet); color: var(--color-porcelain); }
-  .btn-primary:hover { background: #4a40e6; }
+  .btn-primary { background: var(--color-signal-violet); color: #ffffff; }
+  .btn-primary:hover { background: color-mix(in oklab, var(--color-signal-violet) 86%, black); }
   .btn-ghost { background: var(--color-porcelain); color: var(--color-signal-violet); border: 1px solid var(--color-signal-violet); padding: 10px 24px; }
-  .btn-ghost:hover { background: #f4f3ff; }
+  .btn-ghost:hover { background: color-mix(in oklab, var(--color-signal-violet) 9%, var(--color-porcelain)); }
   .btn-quiet { background: var(--color-porcelain); color: var(--color-inkstone); border: 1px solid var(--color-mist); padding: 10px 20px; }
   .btn-quiet:hover { border-color: var(--color-ash); }
   .btn:disabled, .btn[aria-disabled="true"] { background: var(--color-mist); color: var(--color-smoke); border-color: var(--color-mist); cursor: not-allowed; }
@@ -173,7 +210,7 @@ text.text-swap { display: inline; }
     transition: background-color 160ms ease, color 160ms ease;
   }
   .tag-white { background: var(--color-porcelain); }
-  .tag-active { background: var(--color-signal-violet); color: var(--color-porcelain); }
+  .tag-active { background: var(--color-signal-violet); color: #ffffff; }
 
   .input {
     width: 100%; border-radius: var(--radius-input); background: var(--color-porcelain);

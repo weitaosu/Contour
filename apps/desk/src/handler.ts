@@ -1,10 +1,12 @@
 import { compile, scoreBps, normalizeEvent, outcomeBucket, GEMINI_TAKER_FEE_RATE, tradingFeeUsd } from "@contour/core";
 import { decodeEvents } from "@contour/chain";
-import { PublicKey } from "@solana/web3.js";
+import { PublicKey, type ParsedInstruction } from "@solana/web3.js";
+import { ata } from "@contour/chain";
+import { createHash } from "node:crypto";
 import { config } from "./config";
 import type { DB } from "./db";
 import type { Executor } from "./executor";
-import { loadQuoteByHash, type MarketService } from "./markets";
+import { loadQuoteByHash, type MarketService, type StoredQuote } from "./markets";
 import type { SseHub } from "./sse";
 import type { DeskChain } from "./chain";
 
@@ -38,7 +40,7 @@ function now() {
   return Date.now();
 }
 
-function setPosition(db: DB, pubkey: string, patch: Record<string, unknown>) {
+export function setPosition(db: DB, pubkey: string, patch: Record<string, unknown>) {
   const exists = db.prepare("SELECT 1 FROM positions WHERE pubkey = ?").get(pubkey);
   if (!exists) {
     db.prepare("INSERT INTO positions (pubkey, owner, state, created_at, updated_at) VALUES (?, ?, ?, ?, ?)").run(
@@ -192,6 +194,13 @@ async function onOpened(ctx: HandlerCtx, position: string, d: Record<string, unk
   ctx.hub.publish(position, "accepting", { position, signature: acceptSig });
 
   // 4. Hedge each leg (paper by default).
+  await hedgeLegs(ctx, position, quote, sig);
+}
+
+/** Place each of the quote's legs through the executor and record the fills (paper by default). */
+async function hedgeLegs(ctx: HandlerCtx, position: string, quote: StoredQuote, sig: string) {
+  const legs = quote.quote.legs;
+  const feeRate = quote.quote.feeRate ?? GEMINI_TAKER_FEE_RATE;
   const insFill = ctx.db.prepare(
     `INSERT INTO fills (position, symbol, side, strike, qty, price, quoted_price, mode, status, detail_json, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -207,6 +216,62 @@ async function onOpened(ctx: HandlerCtx, position: string, d: Record<string, unk
     }
   }
   ctx.hub.publish(position, "hedged", { position, fills: legs.length, mode: ctx.executor.mode, openedSig: sig });
+}
+
+/**
+ * Direct-payment mode: the buyer sent USDC straight to `config.payTo` instead of opening an escrow.
+ * Check that transfer on-chain against the quote, then record it as a position (Active, with the
+ * quote's schedule) and hedge it like an escrowed one, so it shows on the Record and position pages.
+ * The position id is derived from the payment signature, so recording the same payment twice is a no-op.
+ */
+export async function recordDirectPayment(ctx: HandlerCtx, a: { signature: string; forecastHash: string; owner: string }): Promise<string> {
+  const fail = (msg: string, statusCode = 400) => Object.assign(new Error(msg), { statusCode });
+  if (!config.payTo) throw fail("Direct payments are not enabled on this desk.", 404);
+  if (!ctx.chain) throw fail("Desk chain access is not configured.", 503);
+  const quote = loadQuoteByHash(ctx.db, a.forecastHash);
+  if (!quote) throw fail("No desk quote matches this payment.", 404);
+  const position = new PublicKey(createHash("sha256").update(a.signature).digest()).toBase58();
+  if (ctx.db.prepare("SELECT 1 FROM positions WHERE pubkey = ?").get(position)) return position;
+
+  // The transfer must be confirmed: retry briefly while it lands.
+  let tx = null;
+  for (let i = 0; i < 10 && !tx; i++) {
+    tx = await ctx.chain.connection.getParsedTransaction(a.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+    if (!tx) await new Promise((r) => setTimeout(r, 800));
+  }
+  if (!tx) throw fail("The payment transaction wasn't found on-chain.", 404);
+  if (tx.meta?.err) throw fail("The payment transaction failed on-chain.");
+  const mint = ctx.chain.usdcMint.toBase58();
+  const dest = ata(ctx.chain.usdcMint, new PublicKey(config.payTo)).toBase58();
+  const paid = tx.transaction.message.instructions.some((ix) => {
+    const p = (ix as ParsedInstruction).parsed as { type?: string; info?: Record<string, unknown> } | undefined;
+    const info = p?.info;
+    const amount = (info?.tokenAmount as { amount?: string } | undefined)?.amount;
+    return p?.type === "transferChecked" && info?.mint === mint && info?.destination === dest && info?.authority === a.owner && amount === quote.stakeBaseUnits;
+  });
+  if (!paid) throw fail("That transaction isn't a payment of this quote's amount to Contour's account.");
+
+  const opened = (tx.blockTime ?? Math.floor(Date.now() / 1000)) * 1000;
+  if (opened - quote.createdAt > config.acceptMaxQuoteAgeMs) throw fail("The quote was more than 60 seconds old when it was paid.");
+  const schedule = quote.scheduleBaseUnits;
+  setPosition(ctx.db, position, {
+    owner: a.owner,
+    state: "Active",
+    ticker: quote.ticker,
+    quote_id: quote.quoteId,
+    forecast_hash: a.forecastHash,
+    stake_base: quote.stakeBaseUnits,
+    max_payout_base: String(Math.max(...schedule.map(Number))),
+    schedule_json: JSON.stringify(schedule),
+    expiry_ts: quote.expiryTs,
+    opened_sig: a.signature,
+    accepted_sig: a.signature,
+    pay_to: config.payTo,
+  });
+  ctx.hub.publish(position, "opened", { position, signature: a.signature });
+  ctx.hub.publish(position, "accepted", { position, signature: a.signature });
+  await hedgeLegs(ctx, position, quote, a.signature);
+  return position;
 }
 
 /** Settle Active positions past expiry once Gemini reports the event settled; unwind after grace. */
@@ -250,7 +315,7 @@ export async function runScheduler(ctx: HandlerCtx, graceSecs: number) {
         outcome_bucket: o.bucket,
         score_bps: score,
         payout_base: String(sched[o.bucket]),
-        note: `Outcome: ${o.detail} (Gemini settlement ${o.settlementValue ?? "n/a"}).`,
+        note: `Outcome: ${ladder.bucketLabels[o.bucket]} · ${o.detail}${o.settlementValue !== null && o.settlementValue !== undefined ? ` · Gemini settlement ${o.settlementValue}` : ""}.`,
       });
       ctx.hub.publish(p.pubkey, "settled", { position: p.pubkey, signature: sig, bucket: o.bucket, scoreBps: score });
     } catch (err) {

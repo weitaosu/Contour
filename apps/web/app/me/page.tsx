@@ -38,8 +38,8 @@ function HowScored() {
         })}
       </ul>
       <p className="mt-3 text-[13px] leading-snug text-slate">
-        A positive average over many settled positions means your forecasts were better calibrated than the market&apos;s. Each score is written on-chain when the
-        position settles, so the record can&apos;t be edited or backdated.
+        A positive average over many settled positions means your forecasts were better calibrated than the market&apos;s. Each score is recorded when the position
+        settles; escrowed positions also write it on-chain, where it can&apos;t be edited or backdated.
       </p>
     </Panel>
   );
@@ -143,7 +143,7 @@ function RecordPageContent() {
       </div>
 
       <div className="grid items-start gap-2 lg:grid-cols-[minmax(0,1.45fr)_minmax(0,0.8fr)]">
-        <Panel title="Positions" hint={owner ? "Everything you've opened, newest last. Open one for its payouts and on-chain history." : "Your positions will be listed here."}>
+        <Panel title="Positions" hint={owner ? "Everything you've opened, newest first. Open one for its payouts and history." : "Your positions will be listed here."}>
           {!owner ? (
             <p className="rounded-[16px] bg-porcelain px-4 py-3 text-[14px] text-slate">Connect a wallet to see your positions.</p>
           ) : !data?.positions.length ? (

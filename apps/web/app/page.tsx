@@ -1,5 +1,6 @@
 "use client";
 
+import { smoothScrollToElement } from "@/lib/scroll";
 import { PageTransition } from "@/components/PageTransition";
 import { startTransition, useDeferredValue, useEffect, useMemo, useState, ViewTransition } from "react";
 import Link from "next/link";
@@ -351,6 +352,14 @@ const KINDS = [
   { q: "Who will win?", ex: "2028 nominees, the Fed in December, Best AI", how: "Only when Gemini's rules say exactly one wins and its prices agree. Give each outcome your own odds." },
 ];
 
+/** Demo direct-payment mode: the answers that would otherwise promise escrow. */
+const DIRECT_FAQ: Record<string, string> = {
+  "Why is this on a blockchain at all?":
+    "In the full design, for the locked payout schedule, the user-side timeouts and a forecast record that cannot be backdated. This demo runs in direct-payment mode: payments go straight to Contour's account, with no escrow.",
+  "What is simulated in this demo?":
+    "Payments are real transactions with test USDC, sent straight to Contour's account. The desk's hedge on Gemini is simulated at live quotes.",
+};
+
 const FAQ: [string, string][] = [
   ["Why not just buy one contract?", "One contract pays only if the outcome lands past one strike. A Contour position pays across the whole range you believe in, with a floor you can see before you sign. On the SOL calm-week example it profits anywhere from $67 to $77 and cannot lose more than $37."],
   ["More legs means more spread paid.", "Yes. The solver optimizes at ask prices, so costs are inside the answer, and the screen shows the expected return if the market is right. When costs exceed your edge it buys nothing and tells you there is no trade."],
@@ -362,6 +371,9 @@ const FAQ: [string, string][] = [
 
 function HomeContent() {
   const q = useQuery({ queryKey: ["markets"], queryFn: desk.markets, refetchInterval: 60_000 });
+  // Demo direct-payment mode: payments go straight to one wallet, so the escrow promises don't apply.
+  const payTo = useQuery({ queryKey: ["config"], queryFn: desk.config, staleTime: 60_000 }).data?.payTo ?? null;
+  const faq = payTo ? FAQ.map(([qq, a]) => [qq, DIRECT_FAQ[qq] ?? a] as [string, string]) : FAQ;
   const [search, setSearch] = useState("");
   const [cat, setCat] = useState<string | null>(null);
   const markets = q.data?.markets ?? [];
@@ -429,8 +441,19 @@ function HomeContent() {
                 {offline ? "Live markets are unavailable right now" : "Loading markets…"}
               </span>
             )}
-            <a href="#markets" className="btn btn-quiet !gap-1.5 !px-5 !py-2.5">
-              Browse markets <ArrowDown size={16} strokeWidth={2} />
+            <a
+              href="#markets"
+              className="group btn btn-quiet !gap-1.5 !px-5 !py-2.5"
+              onClick={(e) => {
+                const el = document.getElementById("markets");
+                if (!el) return;
+                e.preventDefault();
+                smoothScrollToElement(el);
+                history.replaceState(null, "", "#markets");
+              }}
+            >
+              Browse markets{" "}
+              <ArrowDown size={16} strokeWidth={2} className="group-hover:translate-y-0.5" style={{ transition: "translate var(--spring-ms) var(--spring)" }} />
             </a>
           </div>
           <div className="mt-auto grid grid-cols-3 gap-2 pt-6">
@@ -503,7 +526,9 @@ function HomeContent() {
             {[
               { icon: LineChart, t: "Reads the market's forecast", b: "A ladder of yes/no contracts becomes one probability curve, cleaned so it can be read at a glance." },
               { icon: SlidersHorizontal, t: "Compiles your forecast", b: "Set where and how sure. The solver sizes a growth-optimal position across every strike, at real ask prices." },
-              { icon: Lock, t: "Holds it on Solana", b: "Your stake and the desk's collateral sit in escrow with the payout schedule and a hash of your forecast." },
+              payTo
+                ? { icon: Lock, t: "Pays on Solana", b: "Your payment goes straight to Contour's account on Solana, with the payout schedule and a hash of your forecast." }
+                : { icon: Lock, t: "Holds it on Solana", b: "Your stake and the desk's collateral sit in escrow with the payout schedule and a hash of your forecast." },
             ].map(({ icon: Icon, t, b }) => (
               <li key={t} className="flex gap-3">
                 <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-porcelain text-signal-violet">
@@ -523,7 +548,7 @@ function HomeContent() {
           </h2>
           <p className="mt-1 text-[13px] text-slate">The ones judges ask.</p>
           <Accordion type="single" collapsible className="mt-3 flex flex-col gap-1.5">
-            {FAQ.map(([qq, a], i) => (
+            {faq.map(([qq, a], i) => (
               <AccordionItem key={i} value={`q${i}`} title={qq}>
                 {a}
               </AccordionItem>

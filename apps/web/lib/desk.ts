@@ -82,6 +82,8 @@ export interface DeskConfig {
   faucetEnabled: boolean;
   /** Desk wallet; null when the desk has no chain keys and cannot accept positions. */
   desk: string | null;
+  /** Demo direct-payment mode: buyers send USDC straight to this wallet (no escrow). Null = escrow flow. */
+  payTo?: string | null;
 }
 
 async function j<T>(res: Response): Promise<T> {
@@ -129,6 +131,11 @@ export const desk = {
     fetch(`${env.deskUrl}/faucet`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ owner }) }).then((r) =>
       j<{ signature: string; sol: number; usdc: number }>(r),
     ),
+  /** Direct-payment mode: save a payment just sent to the desk's pay-to wallet as a position. */
+  recordPayment: (body: { signature: string; forecastHash: string; owner: string }) =>
+    fetch(`${env.deskUrl}/payments`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) =>
+      j<{ position: string }>(r),
+    ),
   streamUrl: (pubkey: string) => `${env.deskUrl}/positions/${pubkey}/stream`,
 };
 
@@ -152,6 +159,7 @@ export interface PositionView {
     owner: string;
     ticker: string | null;
     quote_id: string | null;
+    forecast_hash?: string | null;
     state: string;
     stake_base: string | null;
     max_payout_base: string | null;
@@ -166,6 +174,8 @@ export interface PositionView {
     score_bps: number | null;
     payout_base: string | null;
     note: string | null;
+    /** Set when the position was paid straight to this wallet (direct-payment mode) rather than escrowed. */
+    pay_to?: string | null;
     created_at: number;
     updated_at: number;
   };

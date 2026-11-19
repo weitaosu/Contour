@@ -7,6 +7,7 @@ import { useSlidingPill } from "./ui/SlidingPill";
 import { useQuery } from "@tanstack/react-query";
 import { Logo } from "./Logo";
 import { WalletButton } from "./WalletButton";
+import { ThemeToggle } from "./ThemeToggle";
 import { desk } from "@/lib/desk";
 
 const links = [
@@ -57,7 +58,7 @@ export function Nav() {
   const wide = path === "/" || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/replay");
   return (
     // Named, so page transitions leave it in place: the content moves, the bar stays.
-    <header className="sticky top-0 z-30 border-b border-mist bg-porcelain" style={{ viewTransitionName: "site-header" }}>
+    <header className="sticky top-0 z-30 border-b border-mist bg-canvas/90 backdrop-blur-md" style={{ viewTransitionName: "site-header" }}>
       {/* Market pages are a full-width workspace; the bar lines up with it there. */}
       <div className={`flex h-[72px] items-center gap-6 ${wide ? "mx-auto max-w-[1680px] px-4 md:px-6" : "page"}`}>
         <Link href="/" aria-label="Contour home">
@@ -70,6 +71,7 @@ export function Nav() {
           <span className="tag hidden sm:inline-flex" title="Fills are simulated at live Gemini quotes">
             {mode === "paper" ? "Paper mode" : mode === "sandbox" ? "Sandbox" : "Live"}
           </span>
+          <ThemeToggle />
           <WalletButton />
         </div>
       </div>
