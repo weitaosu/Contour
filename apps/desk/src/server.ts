@@ -9,6 +9,7 @@ import { makeQuote, MarketService } from "./markets";
 import { startRecorder } from "./recorder";
 import { SseHub } from "./sse";
 import { registerPositionRoutes } from "./routes/positions";
+import { registerPaperRoutes } from "./routes/paper";
 import { registerReplayRoutes } from "./routes/replay";
 import { registerHookRoutes } from "./routes/hooks";
 import { getChain } from "./chain";
@@ -101,6 +102,7 @@ export async function buildServer() {
 
   registerPositionRoutes(app, { db, hub, markets });
   registerReplayRoutes(app, { db });
+  registerPaperRoutes(app, { db, markets });
   registerHookRoutes(app, ctx);
 
   app.post("/faucet", async (req, reply) => {

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { History, LayoutGrid, Trophy } from "lucide-react";
+import { Briefcase, History, LayoutGrid, Trophy } from "lucide-react";
 import { useSlidingPill } from "./ui/SlidingPill";
 import { useQuery } from "@tanstack/react-query";
 import { Logo } from "./Logo";
@@ -11,6 +11,7 @@ import { desk } from "@/lib/desk";
 
 const links = [
   { href: "/", label: "Markets", icon: LayoutGrid, hint: "Every market you can trade as one curve" },
+  { href: "/portfolio", label: "Portfolio", icon: Briefcase, hint: "Your positions, valued live, to buy more or sell" },
   { href: "/me", label: "Record", icon: Trophy, hint: "Your forecast record, kept with your wallet" },
   { href: "/replay", label: "Replay", icon: History, hint: "Past markets replayed: one contract versus the whole view" },
 ];
@@ -18,14 +19,14 @@ const links = [
 const isActive = (href: string, path: string) => (href === "/" ? path === "/" || path.startsWith("/m/") : path.startsWith(href));
 
 /**
- * The three pages as one segmented control, like the pickers inside the app: a grey track, the
+ * The pages as one segmented control, like the pickers inside the app: a grey track, the
  * current page a white pill. Every item has the same box, so nothing shifts when it's selected.
  */
 function PageSwitch({ path, full = false }: { path: string; full?: boolean }) {
   const current = links.find((l) => isActive(l.href, path))?.href ?? null;
   const { track, pill } = useSlidingPill(current);
   return (
-    <nav aria-label="Pages" ref={track} className={`relative ${full ? "grid grid-cols-3" : "flex"} items-center gap-0.5 rounded-full bg-cloud p-1`}>
+    <nav aria-label="Pages" ref={track} className={`relative ${full ? "grid grid-cols-4" : "flex"} items-center gap-0.5 rounded-full bg-cloud p-1`}>
       {pill}
       {links.map(({ href, label, icon: Icon, hint }) => {
         const on = isActive(href, path);
@@ -54,7 +55,7 @@ export function Nav() {
   const cfg = useQuery({ queryKey: ["config"], queryFn: desk.config, staleTime: 60_000 });
   const mode = cfg.data?.executionMode ?? "paper";
   // The front page and market pages are full-width workspaces; the bar lines up with them there.
-  const wide = path === "/" || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/replay");
+  const wide = path === "/" || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/replay") || path.startsWith("/portfolio");
   return (
     // Named, so page transitions leave it in place: the content moves, the bar stays.
     <header className="sticky top-0 z-30 border-b border-mist bg-porcelain" style={{ viewTransitionName: "site-header" }}>

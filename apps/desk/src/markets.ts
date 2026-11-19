@@ -308,6 +308,11 @@ export class MarketService {
     return snap && event ? { at: snap.capturedAt, event } : null;
   }
 
+  /** Whether this market's prices currently come from the frozen copy (Gemini unavailable). */
+  isFrozen(ticker: string): boolean {
+    return !!this.events.get(ticker)?.frozen;
+  }
+
   async getEvent(ticker: string, maxAgeMs = 5_000): Promise<RawEvent> {
     // Sample markets are local, made-up data: never ask Gemini for them.
     const sample = loadSamples().find((e) => e.ticker === ticker);

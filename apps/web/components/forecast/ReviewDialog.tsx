@@ -13,6 +13,7 @@ import { openPositionIx, sendTx, useChainConfig, useDeskConfig, useProgram, useU
 import { notableUnused, pct, settleLabel, usd } from "@/lib/format";
 import { isWin, runs, whenPhrase } from "@/lib/outcomes";
 import { WalletDialog } from "@/components/WalletButton";
+import { usePortfolio } from "@/lib/paper";
 
 const dollars = (n: number) => usd(n, Math.abs(n) >= 100 ? 0 : 2);
 
@@ -56,6 +57,7 @@ export function ReviewDialog({
   const zones = runs(wins, (w) => w);
   const chance = ladder.marketProb.reduce((s, p, j) => s + (wins[j] ? p : 0), 0);
   const [ack, setAck] = useState(false);
+  const { publicKey: walletKey } = useWallet();
   // Only what's at risk is escrowed: the quote's unused part is never charged, and every payout drops
   // by the same amount, so profit and loss are unchanged. The desk's quote is what gets signed.
   const kept = (server ? Number(server.keptBaseUnits ?? 0) : escrowTerms(quote).keptBase) / 1e6;
@@ -195,17 +197,28 @@ export function ReviewDialog({
 
           <div className="mt-6 border-t border-mist pt-5">
             <p className="stat-label">When you confirm</p>
-            <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
-              <Step n={1}>
-                Your wallet signs one transaction that locks {usd(pay)} and this exact payout schedule on Solana.
-                {keeps && <> The other {usd(kept)} isn&apos;t used.</>}
-              </Step>
-              <Step n={2}>
-                The desk buys {quote.legs.length} {quote.legs.length === 1 ? "contract" : "contracts"} to back it. If it doesn&apos;t accept within minutes, you can cancel for a full
-                refund.
-              </Step>
-              <Step n={3}>When the market settles, you&apos;re paid by the schedule automatically. Nothing to sell, nothing to watch.</Step>
-            </ol>
+            {walletKey ? (
+              <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
+                <Step n={1}>
+                  Your wallet signs one transaction that locks {usd(pay)} and this exact payout schedule on Solana.
+                  {keeps && <> The other {usd(kept)} isn&apos;t used.</>}
+                </Step>
+                <Step n={2}>
+                  The desk buys {quote.legs.length} {quote.legs.length === 1 ? "contract" : "contracts"} to back it. If it doesn&apos;t accept within minutes, you can cancel for a full
+                  refund.
+                </Step>
+                <Step n={3}>When the market settles, you&apos;re paid by the schedule automatically. Nothing to sell, nothing to watch.</Step>
+              </ol>
+            ) : (
+              <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
+                <Step n={1}>
+                  {quote.legs.length} {quote.legs.length === 1 ? "contract fills" : "contracts fill"} at Gemini&apos;s live asks, about {usd(pay)} from your paper cash.
+                  {keeps && <> The other {usd(kept)} isn&apos;t needed, so it stays in your cash.</>}
+                </Step>
+                <Step n={2}>The position goes into your Portfolio, valued at what it would sell for now. Buy more or sell any of it before it settles.</Step>
+                <Step n={3}>When the market settles, each winning contract pays $1 into your paper cash.</Step>
+              </ol>
+            )}
           </div>
 
           <label className="mt-6 flex cursor-pointer items-start gap-3 rounded-[16px] border border-mist px-4 py-3 text-[15px] text-inkstone hover:border-ash">
@@ -233,7 +246,7 @@ export function ReviewDialog({
             </span>
           </label>
 
-          <ConfirmBlock ladder={ladder} server={server} stake={pay} quoteErr={quoteErr} age={age} ack={ack} />
+          <ConfirmBlock ladder={ladder} server={server} stake={pay} quoteErr={quoteErr} age={age} ack={ack} viewLabel={viewLabel} />
           <Dialog.Close className="btn btn-quiet btn-block mt-3">Back to edit</Dialog.Close>
         </Dialog.Content>
       </Dialog.Portal>
@@ -270,7 +283,99 @@ function paymentError(e: Error): string {
   return `The payment didn't go through: ${m.slice(0, 200)}`;
 }
 
-function ConfirmBlock({ ladder, server, stake, quoteErr, age, ack }: { ladder: Ladder; server: StoredQuote | null; stake: number; quoteErr: string | null; age: number | null; ack: boolean }) {
+function ConfirmBlock({
+  ladder,
+  server,
+  stake,
+  quoteErr,
+  age,
+  ack,
+  viewLabel,
+}: {
+  ladder: Ladder;
+  server: StoredQuote | null;
+  stake: number;
+  quoteErr: string | null;
+  age: number | null;
+  ack: boolean;
+  viewLabel: string;
+}) {
+  const { publicKey } = useWallet();
+  // No wallet: the trade goes into this browser's paper portfolio, filled at Gemini's live prices.
+  if (!publicKey) return <PaperConfirm ladder={ladder} server={server} stake={stake} quoteErr={quoteErr} age={age} ack={ack} viewLabel={viewLabel} />;
+  return <WalletConfirm ladder={ladder} server={server} stake={stake} quoteErr={quoteErr} age={age} ack={ack} />;
+}
+
+/** The paper stand-in for signing: fill the reviewed desk quote into the paper portfolio and open the position. */
+function PaperConfirm({
+  ladder,
+  server,
+  stake,
+  quoteErr,
+  age,
+  ack,
+  viewLabel,
+}: {
+  ladder: Ladder;
+  server: StoredQuote | null;
+  stake: number;
+  quoteErr: string | null;
+  age: number | null;
+  ack: boolean;
+  viewLabel: string;
+}) {
+  const router = useRouter();
+  const qc = useQueryClient();
+  const { account, data: portfolio } = usePortfolio();
+  const [dialog, setDialog] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [err, setErr] = useState<string | null>(null);
+  const cash = portfolio?.totals.cashUsd;
+  const short = cash !== undefined && cash < stake;
+
+  async function place() {
+    if (!account || !server) return;
+    setBusy(true);
+    setErr(null);
+    try {
+      const pos = await desk.paperOpen(account, { quoteId: server.quoteId, label: viewLabel });
+      await qc.invalidateQueries({ queryKey: ["paper", account] });
+      router.push(`/portfolio/${pos.id}?opened=1`);
+    } catch (e) {
+      setErr((e as Error).message);
+      setBusy(false);
+    }
+  }
+
+  const label = busy ? "Placing your trade…" : !server ? "Waiting for desk quote…" : short ? "Not enough paper cash" : `Place paper trade · ${usd(stake)}`;
+  return (
+    <div className="mt-5 flex flex-col gap-3">
+      <button className="btn btn-primary btn-block" disabled={busy || !server || !ack || !account || short} onClick={place}>
+        {label}
+      </button>
+      <p className="text-[14px] text-smoke">
+        {quoteErr
+          ? `Desk quote failed: ${quoteErr}`
+          : server
+            ? `Desk quote · ${age}s ago · fills at Gemini's live asks, within 1¢ of this quote`
+            : "Preview computed in your browser; desk quote pending."}
+        {cash !== undefined ? ` · Paper cash ${usd(cash)}` : ""}
+        {` · Settles ${settleLabel(ladder.expiry)}`}
+      </p>
+      {err && <p className="rounded-2xl bg-porcelain px-4 py-3 text-[14px] text-inkstone">{err}</p>}
+      <p className="text-[13px] text-smoke">
+        Paper trading: no real money moves, and positions live in this browser&apos;s portfolio.{" "}
+        <button type="button" className="font-bold text-signal-violet underline decoration-2 underline-offset-4 hover:text-inkstone" onClick={() => setDialog(true)}>
+          Connect a wallet
+        </button>{" "}
+        to lock it on Solana instead.
+      </p>
+      <WalletDialog open={dialog} onOpenChange={setDialog} />
+    </div>
+  );
+}
+
+function WalletConfirm({ ladder, server, stake, quoteErr, age, ack }: { ladder: Ladder; server: StoredQuote | null; stake: number; quoteErr: string | null; age: number | null; ack: boolean }) {
   const router = useRouter();
   const qc = useQueryClient();
   const { connection } = useConnection();
