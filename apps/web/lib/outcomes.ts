@@ -17,16 +17,20 @@ export function runs<T>(values: readonly T[], test: (v: T, j: number) => boolean
   return out;
 }
 
-/** Buckets a..b in words, for sentences: "between $72 and $77", "at $80 or higher", "below $67". */
+/**
+ * Buckets a..b in words, for sentences: "between $72 and $77", "at $80 or higher", "below $67";
+ * on a date ladder "between Dec 2026 and Mar 2027", "Jun 2027 or later", "before Dec 2026".
+ */
 export function rangePhrase(ladder: Ladder, a: number, b: number) {
   if (!ladder.cuts) return `if ${ladder.bucketLabels.slice(a, b + 1).join(" or ")} wins`;
   const fv = (v: number) => formatValue(v, ladder.unit);
   const lo = a === 0 ? null : fv(ladder.cuts[a - 1]);
   const hi = b === ladder.cuts.length ? null : fv(ladder.cuts[b]);
+  const date = !!ladder.unit.date;
   if (lo && hi) return `between ${lo} and ${hi}`;
-  if (lo) return `at ${lo} or higher`;
-  if (hi) return `below ${hi}`;
-  return "wherever it lands";
+  if (lo) return date ? `${lo} or later` : `at ${lo} or higher`;
+  if (hi) return date ? `before ${hi}` : `below ${hi}`;
+  return date ? "whenever it happens" : "wherever it lands";
 }
 
 /** Buckets a..b in a few characters, for tiles: "$72–$77", "≥ $80", "< $67". */
@@ -36,8 +40,8 @@ export function rangeShort(ladder: Ladder, a: number, b: number) {
   const lo = a === 0 ? null : fv(ladder.cuts[a - 1]);
   const hi = b === ladder.cuts.length ? null : fv(ladder.cuts[b]);
   if (lo && hi) return `${lo}–${hi}`;
-  if (lo) return `≥ ${lo}`;
-  if (hi) return `< ${hi}`;
+  if (lo) return ladder.unit.date ? `${lo} or later` : `≥ ${lo}`;
+  if (hi) return ladder.unit.date ? `Before ${hi}` : `< ${hi}`;
   return "Anywhere";
 }
 
@@ -46,12 +50,12 @@ export function rangeShort(ladder: Ladder, a: number, b: number) {
  * ordered ladders, "if Cut 25 bps or No change wins" for races.
  */
 export function whenPhrase(ladder: Ladder, zones: [number, number][]) {
-  if (ladder.cuts) return `if it lands ${zones.map(([a, b]) => rangePhrase(ladder, a, b)).join(", or ")}`;
+  if (ladder.cuts) return `if it ${ladder.unit.date ? "happens" : "lands"} ${zones.map(([a, b]) => rangePhrase(ladder, a, b)).join(", or ")}`;
   return `if ${zones.flatMap(([a, b]) => ladder.bucketLabels.slice(a, b + 1)).join(" or ")} wins`;
 }
 
 /** "If it lands between $72 and $73" / "If Newsom wins". */
 export function ifItLands(ladder: Ladder, j: number) {
   const p = rangePhrase(ladder, j, j);
-  return ladder.cuts ? `If it lands ${p}` : `I${p.slice(1)}`;
+  return ladder.cuts ? `If it ${ladder.unit.date ? "happens" : "lands"} ${p}` : `I${p.slice(1)}`;
 }

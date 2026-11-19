@@ -8,7 +8,7 @@
 import { blend, bucketMidpoints, marketMoments } from "./beliefs";
 import { compile } from "./compile";
 import { costPerContract, GEMINI_TAKER_FEE_RATE } from "./fees";
-import { formatValue, isTradable, MAX_RELIABLE_SPREAD, MIN_QUOTED, paysIn, thresholdSurvival } from "./normalize";
+import { aboveView, formatValue, isTradable, MAX_RELIABLE_SPREAD, MIN_QUOTED, paysIn, thresholdSurvival } from "./normalize";
 import { anyViewTrades, moreLikelyBelief, OUTLOOK_KEYS, OUTLOOK_PRESETS, outlookBelief, outlookStart } from "./outlooks";
 import type { Instrument, Ladder, Quote } from "./types";
 
@@ -451,8 +451,10 @@ export function qcLadder(l: Ladder, opts: QcOptions = {}): QcResult {
 
   // ---- Quotes ----
   const counted =
-    l.kind === "threshold" ? thresholdSurvival(l.instruments, l.strikes).reliable : l.interpolated.map((x) => !x);
-  const quotes: QcQuoteRow[] = l.instruments.map((ins, i) => {
+    l.kind === "threshold" ? thresholdSurvival(l.instruments.map(aboveView), l.strikes).reliable : l.interpolated.map((x) => !x);
+  // Threshold quotes are read as "at or above the strike" (a "Before …" contract by its complement).
+  const quotes: QcQuoteRow[] = l.instruments.map((raw, i) => {
+    const ins = l.kind === "threshold" ? aboveView(raw) : raw;
     const bid = bidOf(ins);
     const ask = askOf(ins);
     const locked = bid !== null && ask !== null && Math.abs(ask - bid) < 1e-9;
@@ -460,14 +462,15 @@ export function qcLadder(l: Ladder, opts: QcOptions = {}): QcResult {
     return {
       label: ins.label,
       strike: l.kind === "threshold" ? l.strikes[i] : null,
-      yesAsk: ins.yesAsk,
-      noAsk: ins.noAsk,
+      // Gemini's own asks, as quoted; bid, ask and curve are on the "at or above" side the checks compare.
+      yesAsk: raw.yesAsk,
+      noAsk: raw.noAsk,
       bid,
       ask,
       firm,
       counted: counted[i],
       locked,
-      curve: curveWin(l, i, "yes"),
+      curve: curveWin(l, i, raw.below ? "no" : "yes"),
     };
   });
   const firmCount = quotes.filter((q) => q.firm).length;

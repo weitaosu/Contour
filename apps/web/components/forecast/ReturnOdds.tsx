@@ -1,0 +1,556 @@
+"use client";
+
+import { Fragment, useId, useMemo, useState, type ReactNode } from "react";
+import { ChevronDown } from "lucide-react";
+import { paysIn, type Ladder, type Quote } from "@contour/core";
+import { Segmented } from "@/components/ui/Segmented";
+import { COLORS } from "@/components/charts/common";
+import { GAIN } from "@/components/charts/ProfitChart";
+import { isWin } from "@/lib/outcomes";
+import type { Spread } from "@/lib/spread";
+import { usd } from "@/lib/format";
+
+/**
+ * How likely each result is, for this hedge and for putting the whole stake on the single best
+ * contract, as a dropdown. Built on two common ways of showing a range of outcomes:
+ * - Frequency framing ("out of 100 bets like this"), the icon-array format risk-communication
+ *   research finds lay readers judge most accurately. Each dot is filled by the money it brings
+ *   back (a quantile dotplot), so "lose some" shows how much is kept, not just that it's a loss.
+ * - A probability-of-return distribution, the view brokers put behind their P&L charts.
+ * Everything is on the full stake for both bets, in dollars, so they compare like for like. Every
+ * section opens with one plain takeaway, worded from the numbers so it stays true either way.
+ */
+
+type Q = Omit<Quote, "raw">;
+type Cls = "win" | "some" | "all";
+type Basis = "you" | "market";
+
+/** Losing this much or more counts as losing everything (a lost contract still returns rounding cash). */
+const LOSE_ALL = -0.9;
+const ORDER: Cls[] = ["win", "some", "all"];
+const CLASS: Record<Cls, { label: string; short: string; color: string }> = {
+  win: { label: "Make money", short: "make money", color: GAIN },
+  some: { label: "Lose some: the fill is what's left", short: "lose some", color: COLORS.smoke },
+  // An empty ring: nothing comes back. Reads the same in light and dark themes.
+  all: { label: "Lose (nearly) everything", short: "lose it all", color: COLORS.slate },
+};
+
+/** Return bins, as upper edges on the return (−0.9 = 10% of the stake back). */
+const EDGES = [LOSE_ALL, -0.5, -0.25, 0, 0.25, 0.5, 1, 2, 4, Infinity];
+const binOf = (r: number) => EDGES.findIndex((hi) => r <= hi + 1e-9);
+
+const money = (x: number) => {
+  const a = Math.abs(x);
+  const s = a >= 10 || Math.abs(a - Math.round(a)) < 0.005 ? Math.round(a).toLocaleString("en-US") : a.toFixed(2);
+  return `${x < -0.004 ? "−" : ""}$${s}`;
+};
+/** For sentences: rounding cash left over from a lost contract reads as nothing, not "$0.01". */
+const left = (x: number) => (x < 0.5 ? "nothing" : money(x));
+const leftShort = (x: number) => (x < 0.5 ? "$0" : money(x));
+const probPct = (p: number) => (p <= 0 ? "0%" : p < 0.005 ? "<1%" : `${Math.round(p * 100)}%`);
+const times = (a: number, b: number) => {
+  const t = a / b;
+  return t >= 2.95 ? `${Math.round(t)}×` : `${t.toFixed(1)}×`;
+};
+
+/** Whole counts out of `total` that keep the shares' sum exact (largest remainder). */
+function outOf(shares: number[], total: number) {
+  const sum = shares.reduce((a, b) => a + b, 0) || 1;
+  const raw = shares.map((s) => (s / sum) * total);
+  const out = raw.map(Math.floor);
+  let left = total - out.reduce((a, b) => a + b, 0);
+  raw
+    .map((v, i) => [v - Math.floor(v), i] as const)
+    .sort((a, b) => b[0] - a[0])
+    .forEach(([, i]) => {
+      if (left-- > 0) out[i]++;
+    });
+  return out;
+}
+
+interface DotSpec {
+  cls: Cls;
+  /** Share of the stake that comes back, 0–1 (wins are drawn full). */
+  fill: number;
+}
+
+interface Profile {
+  /** Out of 100, per class (sums to 100). */
+  counts: Record<Cls, number>;
+  /** 100 bets, best first: each dot drawn by what it brings back. */
+  dots: DotSpec[];
+  /** Chance of not making money, and the average money back when that happens. */
+  lossChance: number;
+  lossKeep: number | null;
+  /** Chance of each return bin. */
+  bins: number[];
+  best: number;
+  /** Range of results with a real chance (≥ 1 in 200), and how many distinct ones there are. */
+  low: number;
+  high: number;
+  distinct: number;
+}
+
+function profile(payout: number[], stake: number, probs: number[]): Profile {
+  const clsOf = (j: number): Cls => (isWin(payout[j], stake) ? "win" : payout[j] / stake - 1 <= LOSE_ALL + 1e-9 ? "all" : "some");
+  const shares: Record<Cls, number> = { win: 0, some: 0, all: 0 };
+  const bins = new Array<number>(EDGES.length).fill(0);
+  let lossChance = 0;
+  let lossMoney = 0;
+  payout.forEach((p, j) => {
+    const c = clsOf(j);
+    shares[c] += probs[j];
+    bins[binOf(p / stake - 1)] += probs[j];
+    if (c !== "win") {
+      lossChance += probs[j];
+      lossMoney += probs[j] * p;
+    }
+  });
+  const [win, some, all] = outOf(ORDER.map((k) => shares[k]), 100);
+  const counts = { win, some, all };
+
+  // Within each class, share its dots among its outcomes by their odds, best outcome first.
+  const dots: DotSpec[] = [];
+  for (const k of ORDER) {
+    const js = payout.map((_, j) => j).filter((j) => clsOf(j) === k && probs[j] > 0).sort((a, b) => payout[b] - payout[a]);
+    if (!counts[k] || !js.length) continue;
+    const n = outOf(js.map((j) => probs[j]), counts[k]);
+    js.forEach((j, i) => {
+      for (let m = 0; m < n[i]; m++) dots.push({ cls: k, fill: k === "win" ? 1 : Math.max(0, Math.min(1, payout[j] / stake)) });
+    });
+  }
+
+  const real = payout.filter((_, j) => probs[j] >= 0.005);
+  const rounded = new Set(real.map((p) => Math.round(p)));
+  return {
+    counts,
+    dots,
+    lossChance,
+    lossKeep: lossChance > 0.0005 ? lossMoney / lossChance : null,
+    bins,
+    best: Math.max(...payout),
+    low: real.length ? Math.min(...real) : Math.min(...payout),
+    high: real.length ? Math.max(...real) : Math.max(...payout),
+    distinct: rounded.size,
+  };
+}
+
+/** What the comparison contract pays in each bucket: its contracts if it lands, plus the cash it couldn't spend. */
+function singlePayout(ladder: Ladder, quote: Q, stake: number): number[] | null {
+  const c = quote.comparison;
+  if (!c) return null;
+  const idx = ladder.instruments.findIndex((i) => i.symbol === c.symbol);
+  if (idx < 0) return null;
+  const left = Math.max(0, stake - c.qty * c.price - c.fee);
+  return ladder.bucketLabels.map((_, j) => (paysIn(ladder, idx, c.side, j) ? c.qty : 0) + left);
+}
+
+/** One plain-language line on what the comparison says, true to the numbers whichever way they fall. */
+function verdict(h: Profile, s: Profile, stake: number) {
+  const smaller = h.best < s.best - 0.005;
+  const hw = h.counts.win;
+  const sw = s.counts.win;
+  const level = Math.abs(hw - sw) <= 2;
+  const winsMore = hw > sw + 2;
+  // The softer landing: what the hedge leaves you when it loses, against what one contract leaves.
+  const keeps = h.lossKeep !== null && s.lossKeep !== null && h.lossKeep > s.lossKeep + 1;
+  const landing = h.lossKeep === null ? "and it never loses money" : keeps ? `and when it goes wrong you still keep about ${money(h.lossKeep)} of your ${money(stake)}` : null;
+
+  let lead: string;
+  // The multiple always comes with its counts, so "11× as often" can't hide that it's 21 against 2.
+  if (winsMore) lead = `${smaller ? "Smaller wins, but you" : "You"} make money ${sw > 0 ? `${times(hw, sw)} as often (${hw} vs ${sw} in 100)` : `in ${hw} of 100 where one contract never does`}`;
+  else if (level) lead = `${smaller ? "Smaller wins, about" : "About"} as likely to make money (${hw} vs ${sw} in 100)`;
+  else lead = `One contract makes money more often here (${sw} vs ${hw} in 100)`;
+  if (!landing) return `${lead}.`;
+  return winsMore || level ? `${lead}, ${landing}.` : `${lead}, but with the hedge, when it goes wrong you still keep about ${money(h.lossKeep ?? 0)} of your ${money(stake)}.`;
+}
+
+export function ReturnOdds({
+  ladder,
+  quote,
+  belief,
+  sizedDown = null,
+  className = "",
+}: {
+  ladder: Ladder;
+  quote: Q;
+  /** The user's view; null when the position carries none, which leaves only the market's odds. */
+  belief: number[] | null;
+  /** Set when the money put in has little to no spread: one bet with cash held back, which isn't a hedge. */
+  sizedDown?: Spread | null;
+  className?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [basisPick, setBasis] = useState<Basis>("you");
+  const [focus, setFocus] = useState<Cls | null>(null);
+  const basis: Basis = belief ? basisPick : "market";
+  const bodyId = useId();
+  const stake = quote.stakeBase / 1e6;
+  const probs = basis === "you" && belief ? belief : ladder.marketProb;
+
+  const data = useMemo(() => {
+    const single = singlePayout(ladder, quote, stake);
+    if (!single || !quote.legs.length) return null;
+    return { hedge: profile(quote.payoutByBucket, stake, probs), single: profile(single, stake, probs) };
+  }, [ladder, quote, stake, probs]);
+
+  const c = quote.comparison;
+  const oneName = c ? `All on ${c.side.toUpperCase()} “${c.label}”` : "One contract";
+  // Only a spread position is called a hedge; one contract with cash held back is just a smaller bet.
+  const mine = sizedDown ? "Your bet" : "This hedge";
+  const keep = (p: Profile) => (p.lossKeep === null ? "never loses" : leftShort(p.lossKeep));
+  return (
+    <section aria-label="Chance of each result" className={`min-w-0 rounded-[24px] bg-cloud ${className}`}>
+      <button
+        type="button"
+        aria-expanded={open}
+        aria-controls={bodyId}
+        onClick={() => setOpen((o) => !o)}
+        className="ease flex w-full flex-wrap items-center gap-x-6 gap-y-3 rounded-[24px] p-4 text-left hover:bg-mist/40"
+      >
+        <span className="min-w-0 flex-[1_1_20rem]">
+          <span className="block text-[12px] font-bold uppercase tracking-[0.075em] text-slate">How likely is each result?</span>
+          <span className="mt-1 block text-[17px] font-bold leading-snug text-inkstone">
+            {data ? (sizedDown ? sizedVerdict(sizedDown) : verdict(data.hedge, data.single, stake)) : "Your position against putting everything on one contract."}
+          </span>
+        </span>
+        {data && (
+          <span className="tnum grid grid-cols-[auto_auto_auto] items-baseline gap-x-4 gap-y-1 text-[13px] text-slate">
+            <span />
+            <span className="text-right text-[11.5px] font-bold uppercase tracking-[0.075em] text-signal-violet">Yours</span>
+            <span className="text-right text-[11.5px] font-bold uppercase tracking-[0.075em] text-smoke">One contract</span>
+            <span>Make money</span>
+            <b className="text-right text-inkstone">{data.hedge.counts.win} in 100</b>
+            <b className="text-right text-inkstone">{data.single.counts.win} in 100</b>
+            <span>Lose it all</span>
+            <b className="text-right text-inkstone">{data.hedge.counts.all} in 100</b>
+            <b className="text-right text-inkstone">{data.single.counts.all} in 100</b>
+            <span>Keep when it goes wrong</span>
+            <b className="text-right text-inkstone">{keep(data.hedge)}</b>
+            <b className="text-right text-inkstone">{keep(data.single)}</b>
+          </span>
+        )}
+        <ChevronDown size={18} strokeWidth={2} aria-hidden="true" className={`ease shrink-0 text-slate ${open ? "rotate-180" : ""}`} />
+      </button>
+
+      {open && (
+        <div id={bodyId} className="grid gap-7 px-4 pb-4">
+          {!data || !c ? (
+            <p className="text-[13.5px] text-slate">Once you have a trade, this shows how likely each result is next to the single best contract.</p>
+          ) : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3 border-t border-mist pt-4">
+                <p className="text-[13px] text-slate">
+                  Your {money(stake)}, two ways: {mine.toLowerCase()}, or {oneName.replace(/^All on/, "all of it on")} (the best single contract for the same view).
+                </p>
+                {belief && (
+                  <Segmented<Basis>
+                    label="Whose odds"
+                    value={basis}
+                    onChange={setBasis}
+                    options={[
+                      { value: "you", label: "By your forecast" },
+                      { value: "market", label: "By market odds" },
+                    ]}
+                  />
+                )}
+              </div>
+
+              <div>
+                <Heading title="Out of 100 bets like this" hint="Each dot is one bet, filled by the money it brings back. Tap or point at a group to pick it out in both." />
+                <Takeaway>
+                  {sizedDown ? <SizedTakeaway s={sizedDown} /> : <DotTakeaway stake={stake} hedge={data.hedge} single={data.single} />}
+                </Takeaway>
+                <div className="mt-3 grid gap-3 md:grid-cols-2">
+                  <DotCard title={mine} accent stake={stake} p={data.hedge} focus={focus} onFocus={setFocus} />
+                  <DotCard title={oneName} stake={stake} p={data.single} focus={focus} onFocus={setFocus} />
+                </div>
+                <ul className="mt-3 flex flex-wrap gap-x-5 gap-y-1.5 text-[12.5px] text-slate" aria-label="Legend">
+                  {ORDER.map((k) => (
+                    <li key={k} className="flex items-center gap-1.5">
+                      <Dot spec={{ cls: k, fill: k === "some" ? 0.5 : k === "win" ? 1 : 0 }} size={12} />
+                      {CLASS[k].label}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div>
+                <Heading title="Every result, and how likely" hint={`What your ${money(stake)} turns into when the market settles. Best at the top.`} />
+                <Takeaway>
+                  <SpreadTakeaway name={mine} hedge={data.hedge} single={data.single} />
+                </Takeaway>
+                <ReturnBins stake={stake} name={mine} hedge={data.hedge} single={data.single} />
+              </div>
+
+              <p className="text-[12px] leading-snug text-smoke">
+                Odds {basis === "you" ? "by your forecast" : "implied by the market's prices"}, at today&apos;s asks, after Gemini fees. &ldquo;Keep when it goes wrong&rdquo; is the
+                average money back over the results that don&apos;t make money. Not a prediction or advice.
+              </p>
+            </>
+          )}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function Heading({ title, hint }: { title: string; hint?: string }) {
+  return (
+    <>
+      <h3 className="text-[14px] font-bold text-inkstone">{title}</h3>
+      {hint && <p className="mt-0.5 text-[13px] text-slate">{hint}</p>}
+    </>
+  );
+}
+
+/** The one line each section leads with: same quiet accent everywhere, so the eye learns where to look. */
+function Takeaway({ children }: { children: ReactNode }) {
+  return <p className="mt-2 border-l-2 border-signal-violet pl-3 text-[14px] leading-snug text-inkstone">{children}</p>;
+}
+
+/** The headline when the money put in can't be spread: say it's one bet, and that the smaller size is the advice. */
+function sizedVerdict(s: Spread) {
+  return s.kept >= 0.5
+    ? `One bet, sized down. These prices don't reward spreading this view across contracts, so Contour recommends putting in ${usd(s.atRisk)} of your ${money(s.stake)} and keeping the rest back.`
+    : "One bet. These prices don't reward spreading this view across contracts, so it's all-or-nothing on what you put in.";
+}
+
+function SizedTakeaway({ s }: { s: Spread }) {
+  return (
+    <>
+      What comes back when it goes wrong is the <b>{usd(s.kept)}</b> kept back, not a hedge: the <b>{usd(s.atRisk)}</b> you put in is all-or-nothing, like one contract.
+      Betting less is how this view stays smooth.
+    </>
+  );
+}
+
+function DotTakeaway({ stake, hedge, single }: { stake: number; hedge: Profile; single: Profile }) {
+  const hl = hedge.counts.some + hedge.counts.all;
+  const sl = single.counts.some + single.counts.all;
+  if (hl === 0) return <>None of these 100 bets loses money with the hedge. With one contract, {sl} do.</>;
+  const total = single.counts.all >= sl - 1;
+  return (
+    <>
+      When the hedge loses, you usually keep part of it: on average <b>{money(hedge.lossKeep ?? 0)}</b> of your {money(stake)} comes back ({hl} of 100 bets).{" "}
+      {total ? (
+        <>
+          When one contract loses, it&apos;s everything: <b>{left(single.lossKeep ?? 0)}</b> comes back ({sl} of 100).
+        </>
+      ) : (
+        <>
+          When one contract loses, <b>{leftShort(single.lossKeep ?? 0)}</b> comes back on average ({sl} of 100).
+        </>
+      )}
+    </>
+  );
+}
+
+function SpreadTakeaway({ name, hedge, single }: { name: string; hedge: Profile; single: Profile }) {
+  const one =
+    single.distinct <= 2 ? (
+      <>
+        one contract is all or nothing: <b>{leftShort(single.low)}</b> or <b>{money(single.high)}</b>, nothing in between
+      </>
+    ) : (
+      <>
+        one contract runs from <b>{leftShort(single.low)}</b> to <b>{money(single.high)}</b>
+      </>
+    );
+  return (
+    <>
+      {name === "This hedge" ? "The hedge" : "Your bet"}&apos;s results sit between <b>{leftShort(hedge.low)}</b> and <b>{money(hedge.high)}</b>; {one}.
+    </>
+  );
+}
+
+/** One dot: solid when it makes money, filled from the bottom by what's left when it loses some, empty when nothing is. */
+function DotMark({ spec, x, y, r, clip, dim = false }: { spec: DotSpec; x: number; y: number; r: number; clip: string; dim?: boolean }) {
+  const style = { opacity: dim ? 0.18 : 1, transition: "opacity 200ms ease" };
+  if (spec.cls === "win") return <circle cx={x + r} cy={y + r} r={r} fill={CLASS.win.color} style={style} />;
+  if (spec.cls === "all") return <circle cx={x + r} cy={y + r} r={r - 1} fill="none" stroke={CLASS.all.color} strokeWidth={1.75} style={style} />;
+  const h = 2 * r * spec.fill;
+  return (
+    <g transform={`translate(${x} ${y})`} style={style}>
+      <g clipPath={`url(#${clip})`}>
+        <rect x={0} y={2 * r - h} width={2 * r} height={h} fill={CLASS.some.color} />
+      </g>
+      <circle cx={r} cy={r} r={r - 0.75} fill="none" stroke={CLASS.some.color} strokeWidth={1.5} />
+    </g>
+  );
+}
+
+function Dot({ spec, size }: { spec: DotSpec; size: number }) {
+  const clip = useId().replace(/:/g, "");
+  const r = size / 2;
+  return (
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden="true" className="shrink-0">
+      <defs>
+        <clipPath id={clip}>
+          <circle cx={r} cy={r} r={r} />
+        </clipPath>
+      </defs>
+      <DotMark spec={spec} x={0} y={0} r={r} clip={clip} />
+    </svg>
+  );
+}
+
+/** A 10 × 10 icon array beside its three counts; pointing at a count picks out its dots. */
+function DotCard({
+  title,
+  stake,
+  p,
+  accent = false,
+  focus,
+  onFocus,
+}: {
+  title: string;
+  stake: number;
+  p: Profile;
+  accent?: boolean;
+  focus: Cls | null;
+  onFocus: (c: Cls | null) => void;
+}) {
+  const clip = useId().replace(/:/g, "");
+  const summary = ORDER.map((k) => `${p.counts[k]} ${CLASS[k].short}`).join(", ");
+  const note = (k: Cls) => {
+    if (k === "win") return null;
+    if (!p.counts[k]) return null;
+    if (k === "all") return "nothing left";
+    const js = p.dots.filter((d) => d.cls === "some");
+    const avg = js.reduce((a, d) => a + d.fill, 0) / js.length;
+    return `keep ${money(avg * stake)} on average`;
+  };
+  return (
+    <figure className={`rounded-[18px] bg-porcelain p-3 ${accent ? "ring-[1.5px] ring-signal-violet/30" : ""}`}>
+      <figcaption className={`truncate text-[13.5px] font-bold ${accent ? "text-signal-violet" : "text-inkstone"}`} title={title}>
+        {title}
+      </figcaption>
+      <div className="mt-2 grid grid-cols-[minmax(0,180px)_1fr] items-center gap-4">
+        <svg viewBox="0 0 200 200" role="img" aria-label={`${title}: out of 100 bets, ${summary}`} className="block w-full">
+          <defs>
+            <clipPath id={clip}>
+              <circle cx={8} cy={8} r={8} />
+            </clipPath>
+          </defs>
+          {p.dots.map((d, i) => (
+            <DotMark key={i} spec={d} x={(i % 10) * 20 + 2} y={Math.floor(i / 10) * 20 + 2} r={8} clip={clip} dim={focus !== null && focus !== d.cls} />
+          ))}
+        </svg>
+        <ul className="grid gap-1" onMouseLeave={() => onFocus(null)}>
+          {ORDER.map((k) => (
+            <li key={k}>
+              <button
+                type="button"
+                onMouseEnter={() => onFocus(k)}
+                onFocus={() => onFocus(k)}
+                onBlur={() => onFocus(null)}
+                className={`ease flex w-full items-center gap-2.5 rounded-[12px] px-2 py-1.5 text-left ${focus === k ? "bg-cloud" : ""} ${focus !== null && focus !== k ? "opacity-45" : ""}`}
+              >
+                <Dot spec={{ cls: k, fill: k === "some" ? 0.5 : k === "win" ? 1 : 0 }} size={11} />
+                <span className="tnum w-8 shrink-0 text-[20px] font-bold leading-none text-inkstone">{p.counts[k]}</span>
+                <span className="min-w-0 text-[13px] leading-tight text-slate">
+                  {CLASS[k].short}
+                  {note(k) && <span className="block text-[11.5px] text-smoke">{note(k)}</span>}
+                </span>
+              </button>
+            </li>
+          ))}
+        </ul>
+      </div>
+    </figure>
+  );
+}
+
+/** Chance of each range of money back, the two bets as paired bars on one scale, with the stake marked. */
+function ReturnBins({ stake, name, hedge, single }: { stake: number; name: string; hedge: Profile; single: Profile }) {
+  const used = EDGES.map((_, i) => hedge.bins[i] > 0.0005 || single.bins[i] > 0.0005);
+  const lo = used.indexOf(true);
+  const hi = used.lastIndexOf(true);
+  if (lo < 0) return null;
+  const label = (i: number) => {
+    const top = stake * (1 + EDGES[i]);
+    const bottom = i === 0 ? 0 : stake * (1 + EDGES[i - 1]);
+    if (i === 0) return `Under ${money(top)}`;
+    if (!Number.isFinite(top)) return `Over ${money(bottom)}`;
+    return `${money(bottom)}–${money(top)}`;
+  };
+  const rows = EDGES.map((_, i) => i).slice(lo, hi + 1).reverse();
+  const max = Math.max(...rows.map((i) => Math.max(hedge.bins[i], single.bins[i])), 0.01);
+  const firstLoss = rows.findIndex((i) => EDGES[i] <= 0);
+  return (
+    <div className="mt-3 rounded-[18px] bg-porcelain p-3">
+      <div className="mb-2 flex justify-end gap-4 text-[12.5px] text-slate" aria-hidden="true">
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-[3px] bg-signal-violet" /> {name}
+        </span>
+        <span className="flex items-center gap-1.5">
+          <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: COLORS.smoke }} /> One contract
+        </span>
+      </div>
+      <table className="w-full border-collapse text-[13px]">
+        <caption className="sr-only">Chance of each range of money back, {name.toLowerCase()} and one contract</caption>
+        <thead className="sr-only">
+          <tr>
+            <th scope="col">Money back</th>
+            <th scope="col">Chance, {name.toLowerCase()} and one contract</th>
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((i, k) => {
+            const gain = EDGES[i] > 0;
+            const empty = hedge.bins[i] <= 0.0005 && single.bins[i] <= 0.0005;
+            return (
+              <Fragment key={i}>
+                {k === firstLoss && firstLoss > 0 && (
+                  <tr aria-hidden="true">
+                    <td colSpan={2} className="py-1.5">
+                      <div className="flex items-center gap-2 text-[11.5px] font-bold text-slate">
+                        <span className="h-0 flex-1 border-t-[1.5px] border-dashed border-ash" />
+                        Your {money(stake)} back · above: you make money, below: you lose some
+                        <span className="h-0 flex-1 border-t-[1.5px] border-dashed border-ash" />
+                      </div>
+                    </td>
+                  </tr>
+                )}
+                <tr>
+                  <th
+                    scope="row"
+                    className={`w-[7.5rem] whitespace-nowrap pr-3 text-left align-middle ${empty ? "py-0 text-[12px] font-normal text-smoke" : `py-1 ${gain ? "font-bold text-gain-deep" : "font-normal text-slate"}`}`}
+                  >
+                    {label(i)}
+                  </th>
+                  <td className={`align-middle ${empty ? "py-0" : "py-1"}`}>
+                    {empty ? (
+                      <span className="block text-[11.5px] leading-[18px] text-smoke">no chance either way</span>
+                    ) : (
+                      <>
+                        <Bar p={hedge.bins[i]} max={max} color={COLORS.violet} label={name} />
+                        <Bar p={single.bins[i]} max={max} color={COLORS.smoke} label="One contract" />
+                      </>
+                    )}
+                  </td>
+                </tr>
+              </Fragment>
+            );
+          })}
+        </tbody>
+      </table>
+    </div>
+  );
+}
+
+function Bar({ p, max, color, label }: { p: number; max: number; color: string; label: string }) {
+  const none = p <= 0.0005;
+  return (
+    <div className="flex h-[15px] items-center gap-2" aria-label={`${label}: ${probPct(p)}`}>
+      <span className="relative h-[11px] flex-1">
+        <span
+          className="absolute inset-y-0 left-0 rounded-[3px]"
+          style={{ width: `${none ? 0 : Math.max(0.6, (p / max) * 100)}%`, background: color, transition: "width 480ms cubic-bezier(.65,0,.35,1)" }}
+        />
+      </span>
+      <span className={`tnum w-9 text-right text-[12.5px] ${none ? "text-ash" : "font-bold text-inkstone"}`}>{none ? "–" : probPct(p)}</span>
+    </div>
+  );
+}

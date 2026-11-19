@@ -9,6 +9,7 @@ import {
   protect,
   spread,
   tryNormalize,
+  isReversed,
   instrumentFromContract,
   anyViewTrades,
   type DepthMap,
@@ -118,6 +119,8 @@ export class MarketService {
   /** frozenAt: when the data was captured, if it came from the saved snapshot instead of live Gemini. */
   private list: { at: number; markets: MarketSummary[]; rejected: number; frozenAt: number | null; sections: CategorySection[] } | null = null;
   private listPromise: Promise<void> | null = null;
+  /** Each category's events from its last successful fetch, kept for when a later fetch fails. */
+  private lastByCategory = new Map<string, RawEvent[]>();
   private events = new Map<string, { at: number; event: RawEvent; frozen?: boolean; promise?: Promise<RawEvent> }>();
   private books = new Map<string, { at: number; yes?: number; no?: number; yesAsk: number | null; noAsk: number | null }>();
   private lastSnapshotAt = 0;
@@ -154,16 +157,32 @@ export class MarketService {
     const seen = new Set<string>();
     let failures = 0;
     for (const category of await this.categories()) {
+      // Up to 1,500 per category: Sports alone lists over 1,100 active events (every game, now that
+      // game results trade), and stopping at 500 left most of them out.
+      const fetchCategory = () => this.client.listAllEvents({ status: "active", category }, 100, 15);
+      let events: RawEvent[] | null = null;
       try {
-        // An event can be listed under more than one category; keep the first copy.
-        for (const e of await this.client.listAllEvents({ status: "active", category }, 100, 5)) {
-          if (seen.has(e.ticker)) continue;
-          seen.add(e.ticker);
-          all.push(e);
-        }
+        events = await fetchCategory();
       } catch (err) {
-        failures++;
-        console.warn(`[markets] ${category}:`, (err as Error).message);
+        // Big pages sometimes get cut off mid-download, and the network blips: try once more.
+        console.warn(`[markets] ${category}: ${(err as Error).message}; retrying`);
+        await new Promise((r) => setTimeout(r, 2000));
+        try {
+          events = await fetchCategory();
+        } catch (err2) {
+          failures++;
+          // Keep the category's last good copy rather than dropping a whole section from the list.
+          events = this.lastByCategory.get(category) ?? null;
+          console.warn(`[markets] ${category}: ${(err2 as Error).message}; ${events ? `keeping the ${events.length} events from the last refresh` : "no earlier copy to keep"}`);
+        }
+      }
+      if (!events) continue;
+      if (events.length) this.lastByCategory.set(category, events);
+      // An event can be listed under more than one category; keep the first copy.
+      for (const e of events) {
+        if (seen.has(e.ticker)) continue;
+        seen.add(e.ticker);
+        all.push(e);
       }
     }
     // Gemini gave us nothing at all: serve the frozen copy rather than an empty demo.
@@ -481,6 +500,13 @@ export interface StoredQuote {
   marketProb: number[];
   bucketLabels: string[];
   crossedStrikes: string[];
+  /**
+   * The ladder the schedule is over: its contracts in order and its "none of the listed" outcome.
+   * Settlement rebuilds the ladder from these, since by then every contract has settled and the
+   * live rules (which contracts still trade, what the asks leave over) can't be applied again.
+   * Absent on quotes made before it was recorded; those settle from the event as before.
+   */
+  ladderShape?: { symbols: string[]; none: string | null };
 }
 
 /** Compile, size against the book, persist and hash a quote. */
@@ -503,7 +529,9 @@ export async function makeQuote(markets: MarketService, db: DB, req: QuoteReques
   }
   let quote: Quote;
   const direct = !!(req.protect || req.spread); // built straight from contracts: no view, no solver
-  if (direct && ladder.kind !== "threshold") throw Object.assign(new Error("This strategy is only available on price ladders."), { statusCode: 400 });
+  // Protection, collars, covered calls and spreads need an "at or above" price ladder.
+  if (direct && (ladder.kind !== "threshold" || isReversed(ladder)))
+    throw Object.assign(new Error("This strategy is only available on price ladders."), { statusCode: 400 });
   if (req.protect) {
     // Floor / collar / covered call, priced directly from NO asks.
     quote = protect({ ladder, units: req.protect.units, floor: req.protect.floor ?? null, cap: req.protect.cap });
@@ -560,6 +588,7 @@ export async function makeQuote(markets: MarketService, db: DB, req: QuoteReques
     marketProb: ladder.marketProb,
     bucketLabels: ladder.bucketLabels,
     crossedStrikes: ladder.instruments.filter((_, i) => ladder.crossed[i]).map((i) => i.label),
+    ladderShape: { symbols: ladder.instruments.map((i) => i.symbol), none: ladder.none ?? null },
   };
   db.prepare(
     `INSERT INTO quotes (id, ticker, forecast_hash, preimage_json, quote_json, schedule_json, stake_base, expiry_ts, created_at)

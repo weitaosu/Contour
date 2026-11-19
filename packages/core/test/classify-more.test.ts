@@ -61,12 +61,19 @@ describe("named-outcome races", () => {
     const cs = names.map((n, i) => c(n, i, { description: rules("Resolves Yes if X wins."), ...quoted(0.24, 0.26) }));
     expect(classify(ev(cs)).ok).toBe(false);
   });
-  it("are rejected when the prices show a real chance nobody listed wins (asks total under 95%)", () => {
-    // France 2027 on Nov 18: asks summed to 0.78.
+  it("get a 'Someone else' outcome when the prices show a real chance nobody listed wins (asks total under 95%)", () => {
+    // France 2027 on Nov 18: asks summed to 0.78. The unlisted winner becomes an outcome of its own,
+    // priced by what the listed asks leave over, and paid when every listed contract resolves NO.
     const cs = names.map((n, i) => c(n, i, { description: exclusive, ...quoted(0.17, 0.19) }));
-    const r = classify(ev(cs));
-    expect(r.ok).toBe(false);
-    if (!r.ok) expect(r.reason).toMatch(/none of the listed outcomes/);
+    const l = normalizeEvent(ev(cs));
+    expect(l.kind).toBe("categorical");
+    expect(l.none).toBe("Someone else");
+    expect(l.bucketLabels).toEqual([...names, "Someone else"]);
+    expect(l.marketProb.reduce((a, b) => a + b, 0)).toBeCloseTo(1, 12);
+    expect(l.marketProb[4]).toBeGreaterThanOrEqual(1 - 4 * 0.19 - 1e-9);
+    // No listed contract pays in it; every NO does.
+    expect(names.map((_, i) => paysIn(l, i, "yes", 4))).toEqual([false, false, false, false]);
+    expect(names.map((_, i) => paysIn(l, i, "no", 4))).toEqual([true, true, true, true]);
   });
   it("are rejected when the prices say several can win (bids total over 105%)", () => {
     // US GDP 2026 on Nov 18: bids summed to 2.86 despite the rules' wording.
@@ -77,17 +84,28 @@ describe("named-outcome races", () => {
     const cs = names.map((n, i) => c(n, i, { description: exclusive, prices: i < 2 ? quoted(0.3, 0.33).prices : {} }));
     expect(classify(ev(cs))).toEqual({ ok: true, kind: "categorical" });
   });
-  it("still need three or more outcomes (two are one yes/no question)", () => {
+  it("can have two outcomes, when the rules say they are mutually exclusive", () => {
     const cs = names.slice(0, 2).map((n, i) => c(n, i, { description: exclusive, ...quoted(0.48, 0.52) }));
-    expect(classify(ev(cs)).ok).toBe(false);
+    const l = normalizeEvent(ev(cs));
+    expect(l.kind).toBe("categorical");
+    expect(l.none).toBeUndefined();
+    expect(l.bucketLabels).toEqual(["Ann", "Ben"]);
+  });
+  it("ignore stale bids left on long shots (crossed or one-sided quotes aren't evidence)", () => {
+    // The Game Awards on Nov 19: a firm 92¢ bid on the favourite, plus 11¢ and 8¢ bids sitting above
+    // 5¢ asks on two long shots. Only the firm quote counts, so the race is consistent.
+    const crossed = (bid: number, ask: number) => ({ prices: { buy: { yes: String(ask), no: String(+(1 - bid).toFixed(4)) } } });
+    const cs = [
+      c("GTA VI", 0, { description: exclusive, ...quoted(0.92, 0.96) }),
+      c("Requiem", 1, { description: exclusive, ...crossed(0.11, 0.05) }),
+      c("Phantom", 2, { description: exclusive, ...crossed(0.08, 0.05) }),
+      c("Tie", 3, { description: exclusive, prices: { bestAsk: "0.05", buy: { yes: "0.05" } } }),
+    ];
+    expect(classify(ev(cs)).ok).toBe(true);
   });
 });
 
 describe("shapes that must stay rejected", () => {
-  it("'before <date>' ladders: several can resolve yes", () => {
-    const cs = ["Before Jan 1, 2027", "Before Dec 1, 2026", "Before Nov 1, 2026"].map((x, i) => c(x, i, { description: rules("Resolves Yes if it happens before this date.") }));
-    expect(classify(ev(cs)).ok).toBe(false);
-  });
   it("'which of these will happen' lists: several can resolve yes", () => {
     const cs = ["OpenAI", "Anthropic", "Micron"].map((x, i) => c(x, i, { description: rules("Resolves Yes if the US takes a stake in X.") }));
     expect(classify(ev(cs)).ok).toBe(false);

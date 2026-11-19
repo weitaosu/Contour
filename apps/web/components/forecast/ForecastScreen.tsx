@@ -8,6 +8,7 @@ import {
   formatValue,
   fromBars,
   isTradable,
+  isReversed,
   likelyRange,
   marketMoments,
   normalBelief,
@@ -40,6 +41,8 @@ import { CompareMini } from "./ComparisonCard";
 import { LegsTable } from "./LegsPanel";
 import { Fill, Panel, StepBadge } from "./Panel";
 import { CandidateEditor } from "./CandidateEditor";
+import { ReturnOdds } from "./ReturnOdds";
+import { spreadOf } from "@/lib/spread";
 import { OUTLOOKS, OutlookPicker, SPLIT_OFFSET, type Outlook } from "./OutlookPicker";
 import { ReviewDialog } from "./ReviewDialog";
 import { ConfidenceDialog } from "./ConfidenceDialog";
@@ -47,6 +50,15 @@ import { FrozenBanner, SampleBanner } from "@/components/FrozenBanner";
 import { CHART_MS, liveFill, useLive } from "@/lib/live";
 import { networkName } from "@/lib/env";
 import { LiveDot, LivePrice, TickNumber, spotText } from "./LivePrice";
+
+/** A length of time in plain words: "12 days", "3 months", "1.5 years". */
+function timeSpan(ms: number): string {
+  const days = Math.abs(ms) / 86_400_000;
+  if (days < 45) return `${Math.max(1, Math.round(days))} ${Math.round(days) === 1 ? "day" : "days"}`;
+  const months = days / 30.44;
+  if (months < 18) return `${Math.round(months)} months`;
+  return `${(Math.round((months / 12) * 10) / 10).toString()} years`;
+}
 
 /** New positions stop this long before a market settles (matches the desk's CLOSE_BUFFER_MS). */
 const CLOSE_BUFFER_MS = 10 * 60_000;
@@ -172,7 +184,9 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
   const clamp = (v: number, lo: number, hi: number) => Math.min(hi, Math.max(lo, v));
   // "Protect what I hold": price ladders only. The floor defaults to about half a market spread below
   // the expected price, a typical "protect against a meaningful drop" choice.
-  const canProtect = ladder.kind === "threshold";
+  // Not on a ladder that reads the other way ("Before …", "… or below"): protection is built from NO
+  // contracts on "at or above" strikes.
+  const canProtect = ladder.kind === "threshold" && !isReversed(ladder);
   const floors = useMemo(() => floorChoices(ladder), [ladder]);
   const name = useMemo(() => underlyingName(ladder), [ladder]);
   // What the user is doing: an everyday outlook (the default), protecting a holding, or one of the
@@ -207,7 +221,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
     setSpreadDir(d);
     setSpreadIdx(d === "up" ? [centerIdx, Math.min(strikes.length - 1, centerIdx + 4)] : [Math.max(0, centerIdx - 4), centerIdx]);
   };
-  const spreading = strategy === "spread" && ladder.kind === "threshold" && strikes.length >= 3;
+  const spreading = strategy === "spread" && ladder.kind === "threshold" && !isReversed(ladder) && strikes.length >= 3;
   const spreadQuote = useMemo(() => {
     if (!spreading) return null;
     try {
@@ -499,7 +513,8 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
     const [a, b] = likelyRange(ladder.marketProb, 0.5);
     const lo = a === 0 ? null : formatValue(ladder.cuts[a - 1], ladder.unit);
     const hi = b === ladder.cuts.length ? null : formatValue(ladder.cuts[b], ladder.unit);
-    const range = lo && hi ? `${lo} – ${hi}` : lo ? `${lo} or above` : hi ? `below ${hi}` : "anywhere";
+    const date = !!ladder.unit.date;
+    const range = lo && hi ? `${lo} – ${hi}` : lo ? `${lo} or ${date ? "later" : "above"}` : hi ? `${date ? "before" : "below"} ${hi}` : "anywhere";
     return { from: a, to: b, label: `Market's likely range: ${range}` };
   }, [ladder, ordered]);
 
@@ -518,11 +533,13 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
     const [a, b] = likelyRange(ladder.marketProb, 2 / 3);
     const lo = a === 0 ? null : fmt(ladder.cuts[a - 1]);
     const hi = b === ladder.cuts.length ? null : fmt(ladder.cuts[b]);
-    return lo && hi ? `${lo}–${hi}` : lo ? `${lo} or above` : hi ? `below ${hi}` : null;
+    const date = !!ladder.unit.date;
+    return lo && hi ? `${lo}–${hi}` : lo ? `${lo} or ${date ? "later" : "above"}` : hi ? `${date ? "before" : "below"} ${hi}` : null;
   }, [ladder, ordered]); // eslint-disable-line react-hooks/exhaustive-deps
   const fmtCenter = fmt(center);
   const width = range.sd * scale;
-  const widthLabel = fmt(width);
+  // On a date ladder the width is a length of time ("±3 months"), not a date.
+  const widthLabel = ladder.unit.date ? timeSpan(width) : fmt(width);
   // The view in plain terms. One bell: a 2-in-3 likely range (center ± one standard deviation).
   // Big move: two humps either side of the midpoint, each with its own ± width.
   const humps = split ? ([center - splitOffset * range.sd, center + splitOffset * range.sd] as const) : null;
@@ -662,6 +679,10 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
       </Panel>
     ) : null;
   const comparing = !protecting && !summaryStatus && hasPosition && !!display.comparison;
+  // A position whose money put in is all-or-nothing (one contract plus cash held back) isn't a hedge:
+  // the ticket and the results dropdown say it's a smaller bet instead.
+  const sizing = !protecting && !spreading && hasPosition && display.legs.length > 0 ? spreadOf(display, ladder.marketProb) : null;
+  const oneBet = sizing && !sizing.spread ? sizing : null;
   const comparePanel = !protecting ? (
     <Panel id="compare" title="vs betting on one contract" className="max-lg:order-7" bodyClassName={comparing ? fade : ""}>
       {comparing ? (
@@ -703,7 +724,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
               </span>
             </span>
             <button type="button" className="btn btn-primary shrink-0 !px-5 !py-2.5" onClick={openReview}>
-              {protecting ? "Review" : "Review hedge"}
+              {protecting ? "Review" : "Review bet"}
             </button>
           </>
         ) : (
@@ -756,7 +777,8 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
           comparison) with the contracts underneath; the order ticket down the right, pinned while
           you scroll. Phones: the panels stack in step order; the bottom bar keeps Review one tap away. */}
       {/* On screens with height to spare, the workspace fills the window and the two main panels take the extra. */}
-      <div className="grid flex-1 grid-cols-1 items-start gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(320px,348px)]">
+      {/* Two rows on wide screens: the workspace takes the screen's spare height, the results dropdown sits under it. */}
+      <div className={`grid flex-1 grid-cols-1 items-start gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(320px,348px)] ${protecting ? "" : "lg:grid-rows-[1fr_auto]"}`}>
         <div className="flex min-w-0 flex-col gap-2 max-lg:contents lg:self-stretch">
           {ordered && (
             <div id="outlook" className="min-w-0 scroll-mt-24 max-lg:order-1">
@@ -767,6 +789,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                 expected={fmt(mkt.mean)}
                 live={!!spot}
                 settles={settlesText}
+                dates={!!ladder.unit.date}
                 step={1}
                 unavailable={unavailable}
                 prompt={!hasPosition}
@@ -971,13 +994,14 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
           </div>
         </div>
 
-        {/* The order ticket, in full, as one column the height of the whole workspace: its top lines
-            up with the outlook and its bottom with the last row of panels. Controls sit at the top,
-            the summary and Review at the bottom. */}
+        {/* The order ticket: its top lines up with the outlook, controls first, then the summary and
+            Review straight under them (no stretched gap). On wide screens it stays in view as the page
+            scrolls, so Review sits beside the results dropdown when that's open; if the screen is too
+            short for all of it, it scrolls inside itself. */}
         <aside
           id="controls"
           aria-labelledby="controls-title"
-          className="flex min-w-0 scroll-mt-24 flex-col rounded-[24px] bg-cloud max-lg:order-5 lg:self-stretch"
+          className="flex min-w-0 scroll-mt-24 flex-col rounded-[24px] bg-cloud max-lg:order-5 lg:sticky lg:top-[81px] lg:max-h-[calc(100dvh-89px)] lg:self-start lg:overflow-y-auto"
         >
           <div className="px-4 pt-4 xl:px-5 xl:pt-5">
             <h2 id="controls-title" className="flex items-center gap-2 text-[16px] font-bold leading-tight text-inkstone">
@@ -992,10 +1016,10 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                       ? "Set up your spread"
                       : ranging
                         ? "Set up your range"
-                        : "Set up your hedge"}
+                        : "Set up your bet"}
             </h2>
           </div>
-          <div className="flex flex-col gap-5 px-4 py-4 xl:px-5">
+          <div className="flex flex-col gap-4 px-4 py-4 xl:px-5">
           {protecting && (
             <ProtectControls
               name={name}
@@ -1049,7 +1073,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
             </>
           )}
           </div>
-          <div className="mt-auto flex flex-col gap-3 border-t border-mist px-4 pb-4 pt-4 xl:px-5">
+          <div className="flex flex-col gap-3 border-t border-mist px-4 pb-4 pt-4 xl:px-5">
             {protecting && protectQuote ? (
               <>
                 {covering && shownBack !== null ? (
@@ -1133,6 +1157,19 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                       : ""}
                   </span>
                 </p>
+                {oneBet && (
+                  // When the money put in can't be spread, say so: holding cash back lowers the risk, but it isn't a hedge.
+                  <p className="border-l-2 border-signal-violet pl-3 text-[13px] leading-snug text-inkstone">
+                    <b>{notableUnused(oneBet.kept) ? "One bet, sized down." : "One bet."}</b> These prices don&apos;t reward spreading this view across contracts
+                    {notableUnused(oneBet.kept) ? (
+                      <>
+                        , so Contour recommends a smaller bet: {usd(oneBet.atRisk)} in, {usd(oneBet.kept)} kept back.
+                      </>
+                    ) : (
+                      <>, so it&apos;s all-or-nothing on what you put in.</>
+                    )}
+                  </p>
+                )}
               </>
             ) : closed ? (
               <p className="rounded-2xl bg-porcelain px-4 py-3 text-[14px] text-inkstone">
@@ -1146,13 +1183,13 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                   ? "Put in a bit more: at this amount the spread is smaller than one contract per step."
                   : !started
                     ? ordered
-                      ? "Pick an outlook to build your hedge."
+                      ? "Pick an outlook to build your bet."
                       : "Set your odds to build a position."
                     : "Your view is too close to the market's to trade yet."}
               </p>
             )}
             <button type="button" className="btn btn-primary btn-block" disabled={!tradable} onClick={openReview}>
-              {covering ? "Review covered call" : protecting ? "Review protection" : spreading ? "Review spread" : "Review hedge"}
+              {covering ? "Review covered call" : protecting ? "Review protection" : spreading ? "Review spread" : "Review bet"}
             </button>
             <p className="text-center text-[13px] text-smoke">You&apos;ll see a plain summary before you sign.</p>
           </div>
@@ -1191,6 +1228,19 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
             age={serverFresh ? Math.round((now - serverFresh.at) / 1000) : null}
           />
         </aside>
+
+        {/* How likely each result is, next to putting everything on one contract (closed until opened).
+            Its own row under the panels, so opening it never stretches the order ticket, which stays in
+            view beside it. */}
+        {!protecting && (
+          <ReturnOdds
+            ladder={ladder}
+            quote={comparing ? display : { ...display, comparison: null }}
+            belief={spreading ? null : solveBelief}
+            sizedDown={comparing ? oneBet : null}
+            className="max-lg:order-7 lg:col-start-1"
+          />
+        )}
       </div>
     </div>
   );
