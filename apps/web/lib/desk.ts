@@ -260,7 +260,6 @@ export const desk = {
   /** The wallet's paid positions as a portfolio: open ones valued live, settled ones at what they paid. */
   walletPortfolio: (owner: string) => fetch(`${env.deskUrl}/wallets/${owner}/portfolio`).then((r) => j<PaperPortfolio>(r)),
   record: (owner: string) => fetch(`${env.deskUrl}/wallets/${owner}/record`).then((r) => j<RecordView>(r)),
-  replay: () => fetch(`${env.deskUrl}/replay`).then((r) => j<ReplayView>(r)),
   faucet: (owner: string) =>
     fetch(`${env.deskUrl}/faucet`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ owner }) }).then((r) =>
       j<{ signature: string; sol: number; usdc: number }>(r),
@@ -325,14 +324,3 @@ export interface RecordView {
   summary: { count: number; settled: number; meanScore: number | null; totalScore: number };
 }
 
-export interface ReplayView {
-  sampleSize: number;
-  /** How many of those ladders are simulated for the demo rather than recorded from Gemini. */
-  simulated?: number;
-  ladders?: number;
-  horizonNote?: string;
-  generatedAt?: string;
-  strategies: { name: string; forecast: string; kind: "contour" | "single"; n: number; mean: number; sd: number; worst: number; best?: number; shareProfit: number }[];
-  series: { forecast: string; points: { t: string; ticker: string; contour: number; single: number }[] }[];
-  note: string;
-}

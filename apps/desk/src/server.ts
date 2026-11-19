@@ -10,7 +10,6 @@ import { startRecorder } from "./recorder";
 import { SseHub } from "./sse";
 import { registerPositionRoutes } from "./routes/positions";
 import { registerPaperRoutes } from "./routes/paper";
-import { registerReplayRoutes } from "./routes/replay";
 import { registerHookRoutes } from "./routes/hooks";
 import { getChain } from "./chain";
 import { makeExecutor } from "./executor";
@@ -115,7 +114,6 @@ export async function buildServer() {
       return reply.status(e.statusCode ?? 500).send({ error: e.message });
     }
   });
-  registerReplayRoutes(app, { db });
   registerPaperRoutes(app, { db, markets });
   registerHookRoutes(app, ctx);
 

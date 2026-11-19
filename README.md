@@ -41,7 +41,7 @@ The pieces are not new: payoffs built from a strip of claims, Kelly sizing and l
 ```
 contour/
   apps/web        Next.js 16 (App Router), Tailwind v4 (DESIGN.md tokens), wallet adapter, SVG charts (d3-scale)
-  apps/desk       Fastify service: markets, quotes, Stream webhook, executor, scheduler, recorder, replay, faucet (SQLite)
+  apps/desk       Fastify service: markets, quotes, Stream webhook, executor, scheduler, recorder, faucet (SQLite)
   packages/core   Pure TS: ladder normalization, beliefs, compiler, scoring, settlement mapping, hashing. No I/O.
   packages/gemini Gemini REST client (public + signed), rate limiter
   packages/chain  Anchor IDL, PDA helpers, instruction builders, event decoding
@@ -79,7 +79,7 @@ cp apps/web/.env.example apps/web/.env.local
 pnpm dev           # starts the desk (http://localhost:4000) and the web app (http://localhost:3000) together
 ```
 
-Everything that reads Gemini works: the market list, the forecast screen (outlooks, sliders, drag-to-reshape, payouts, key numbers, the results dropdown, the comparison, legs), desk quotes, paper trading without a wallet, and `/replay`. Without desk keys the desk logs `[chain] disabled` and on-chain confirmation stays off: that is expected.
+Everything that reads Gemini works: the market list, the forecast screen (outlooks, sliders, drag-to-reshape, payouts, key numbers, the results dropdown, the comparison, legs), and desk quotes. Trading needs a connected devnet wallet; the Portfolio tab shows its positions valued live. Without desk keys the desk logs `[chain] disabled` and on-chain confirmation stays off: that is expected.
 
 ### B. Full flow on a local Solana validator (no devnet SOL, no accounts, ~3 minutes)
 
@@ -122,7 +122,7 @@ anchor build && cargo test -p contour      # 12 LiteSVM tests with a warped cloc
 
 | Command | What it does |
 | --- | --- |
-| `pnpm recorder` | 5-minute Gemini ladder snapshots into `data/desk.sqlite` (feeds `/replay`) |
+| `pnpm recorder` | 5-minute Gemini ladder snapshots into `data/desk.sqlite` (market history for later analysis) |
 | `pnpm e2e:devnet` | the end-to-end check against a devnet desk |
 | `python3 -I scripts/fixtures/reference.py fixtures/raw/sol_nov20.json fixtures/sol_calm.json` | regenerate the compiler fixture with the independent SciPy solver |
 | `docker build -f apps/desk/Dockerfile -t contour-desk .` | desk image for hosting (mount keys and a `/data` volume) |
@@ -192,10 +192,6 @@ Trading: the order endpoint is `POST /v1/prediction-markets/order` (limit orders
 | Security | The desk verifies `x-qn-signature` = hex HMAC-SHA256(security token, `x-qn-nonce` + `x-qn-timestamp` + body) with a constant-time compare; unsigned deliveries are rejected |
 
 **Why.** The Stream is the desk's only trigger: it learns of every `open`, `accept`, `cancel`, `settle` and `unwind` without polling, decodes Anchor events straight from the logs (no follow-up RPC), and processes them idempotently by signature. The desk then pushes the decoded events to the browser over server-sent events, which drive the live position page.
-
-## Replay
-
-The recorder stores every crypto price ladder (hourly, daily, weekly, monthly) and quoted weather ladder every 5 minutes, plus each ladder's outcome. `/replay` takes the snapshot 30 min (hourly), 6 h (daily, weather) or 24 h (weekly/monthly) before expiry, applies fixed test forecasts (market ±½ sd, market narrowed to 0.6×) at confidence 0.5, and compares a $100 Contour position with the single best contract for the same forecast: count, mean, standard deviation, worst return, share profitable, and cumulative lines. The sample size is printed on the page. It is an illustration, not proof.
 
 ## Tests
 
