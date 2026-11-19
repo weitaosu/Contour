@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { History, LayoutGrid, Trophy } from "lucide-react";
+import { Briefcase, History, LayoutGrid } from "lucide-react";
 import { useSlidingPill } from "./ui/SlidingPill";
 import { useQuery } from "@tanstack/react-query";
 import { Logo } from "./Logo";
@@ -12,13 +12,13 @@ import { desk } from "@/lib/desk";
 
 const links = [
   { href: "/", label: "Markets", icon: LayoutGrid, hint: "Every market you can trade as one curve" },
-  { href: "/me", label: "Record", icon: Trophy, hint: "Your paper portfolio, valued live, and your forecast record" },
+  { href: "/me", label: "Portfolio", icon: Briefcase, hint: "Your wallet's positions, valued live" },
   { href: "/replay", label: "Replay", icon: History, hint: "Past markets replayed: one contract versus the whole view" },
 ];
 
-// Position pages (/portfolio/<id>) live under the Record tab.
+// Position pages (/p/<pubkey>, and paper ones at /portfolio/<id>) live under the Portfolio tab.
 const isActive = (href: string, path: string) =>
-  href === "/" ? path === "/" || path.startsWith("/m/") : href === "/me" ? path.startsWith("/me") || path.startsWith("/portfolio") : path.startsWith(href);
+  href === "/" ? path === "/" || path.startsWith("/m/") : href === "/me" ? path.startsWith("/me") || path.startsWith("/portfolio") || path.startsWith("/p/") : path.startsWith(href);
 
 /**
  * The pages as one segmented control, like the pickers inside the app: a grey track, the
@@ -57,7 +57,7 @@ export function Nav() {
   const cfg = useQuery({ queryKey: ["config"], queryFn: desk.config, staleTime: 60_000 });
   const mode = cfg.data?.executionMode ?? "paper";
   // The front page and market pages are full-width workspaces; the bar lines up with them there.
-  const wide = path === "/" || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/replay") || path.startsWith("/portfolio");
+  const wide = path === "/" || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/replay") || path.startsWith("/portfolio") || path.startsWith("/p/");
   return (
     // Named, so page transitions leave it in place: the content moves, the bar stays.
     <header className="sticky top-0 z-30 border-b border-mist bg-canvas/90 backdrop-blur-md" style={{ viewTransitionName: "site-header" }}>

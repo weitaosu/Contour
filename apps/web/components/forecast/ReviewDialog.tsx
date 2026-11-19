@@ -16,13 +16,14 @@ import { notableUnused, pct, settleLabel, short, usd } from "@/lib/format";
 import { explorerTx } from "@/lib/env";
 import { isWin, runs, whenPhrase } from "@/lib/outcomes";
 import { WalletDialog } from "@/components/WalletButton";
-import { usePortfolio } from "@/lib/paper";
+import { FOCUS_PANEL } from "@/components/forecast/Panel";
+import { Tile } from "@/components/forecast/ProfitCard";
 
 const dollars = (n: number) => usd(n, Math.abs(n) >= 100 ? 0 : 2);
 
 /**
- * The last screen before signing: the position in plain words (worst case included), what happens
- * on confirm, and a short standard risk line. Owns the wallet / faucet / open-position flow.
+ * The last screen before signing: the position in plain words, what happens on confirm, and an
+ * explicit acknowledgement of the worst case. Owns the wallet / faucet / open-position flow.
  */
 export function ReviewDialog({
   open,
@@ -61,8 +62,6 @@ export function ReviewDialog({
   const chance = ladder.marketProb.reduce((s, p, j) => s + (wins[j] ? p : 0), 0);
   // Direct-payment mode: the USDC goes straight to this wallet instead of an escrow.
   const payTo = useDeskConfig().data?.payTo ?? null;
-  // No wallet connected: the trade goes into the paper portfolio instead.
-  const { publicKey: walletKey } = useWallet();
   // Only what's at risk is escrowed: the quote's unused part is never charged, and every payout drops
   // by the same amount, so profit and loss are unchanged. The desk's quote is what gets signed.
   const kept = (server ? Number(server.keptBaseUnits ?? 0) : escrowTerms(quote).keptBase) / 1e6;
@@ -78,174 +77,130 @@ export function ReviewDialog({
     >
       <Dialog.Portal>
         <Dialog.Overlay className="fade-in fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]" />
-        <Dialog.Content className="fade-up fixed inset-x-0 bottom-0 z-50 max-h-[92vh] overflow-y-auto rounded-t-[32px] bg-porcelain px-6 pb-8 pt-6 md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:w-[min(560px,calc(100vw-32px))] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[36px] md:p-8">
-          <div className="flex items-start justify-between gap-4">
+        <Dialog.Content className="fade-up fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden rounded-t-[32px] bg-porcelain shadow-[0_24px_64px_-24px_rgba(0,0,0,0.45)] md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:w-[min(600px,calc(100vw-32px))] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[32px]">
+          {/* Header: stays put while the details scroll */}
+          <div className="flex items-start justify-between gap-4 px-6 pb-3 pt-6 md:px-7">
             <div className="min-w-0">
-              <p className="eyebrow">{confidence === null ? "Review your protection" : "Review your bet"}</p>
-              <Dialog.Title className="mt-1 text-[24px] font-bold leading-tight text-inkstone">{ladder.title}</Dialog.Title>
-              <p className="mt-1 text-[14px] text-slate">Settles {settleLabel(ladder.expiry)}</p>
+              <p className="text-[12.5px] uppercase tracking-[0.075em] text-smoke">{confidence === null ? "Review your protection" : "Review your hedge"}</p>
+              <Dialog.Title className="mt-1.5 text-[24px] font-bold leading-tight text-inkstone">{ladder.title}</Dialog.Title>
+              <p className="mt-1 text-[13.5px] text-slate">Settles {settleLabel(ladder.expiry)}</p>
             </div>
-            <Dialog.Close className="rounded-full p-2 text-slate hover:bg-cloud" aria-label="Close">
+            <Dialog.Close className="-mr-2 rounded-full p-2 text-slate hover:bg-cloud" aria-label="Close">
               <X size={20} />
             </Dialog.Close>
           </div>
 
-          <Dialog.Description className="mt-5 rounded-[20px] bg-cloud px-5 py-4 text-[18px] font-bold leading-snug text-inkstone">
-            {headline ? (
-              headline
-            ) : zones.length ? (
-              <>
-                You make money <span className="text-signal-violet">{whenPhrase(ladder, zones)}</span>.
-              </>
-            ) : (
-              <>At this setting your money barely moves.</>
-            )}
-          </Dialog.Description>
-
-          <dl className="mt-5 grid grid-cols-[auto_1fr] gap-x-6 gap-y-3 text-[15px]">
-            <Row
-              label={protection ? "Protection" : "Your view"}
-              value={viewLabel.split(" · ").map((part, i) => (
-                <span key={i} className="whitespace-nowrap">
-                  {i > 0 && " · "}
-                  {part}
-                </span>
-              ))}
-            />
-            {confidence !== null && <Row label="Follows your view" value={confidence >= 1 ? "100% · full match" : `${pct(confidence)} · safer`} />}
-            <Row
-              label="You pay"
-              value={
+          {/* Scrolls on small screens without showing a scrollbar; the fade at the bottom says there's more. */}
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pb-5 pt-1.5 [mask-image:linear-gradient(to_bottom,#000_calc(100%-20px),transparent)] [scrollbar-width:none] md:px-7 [&::-webkit-scrollbar]:hidden" data-scroll-body>
+            <Dialog.Description className={`rounded-[20px] px-5 py-3 text-[17px] font-bold leading-snug text-inkstone ${FOCUS_PANEL}`}>
+              {headline ? (
+                headline
+              ) : zones.length ? (
                 <>
-                  {usd(pay)}
-                  {keeps && <span className="font-normal text-slate"> · of your {usd(stake)}</span>}
+                  You make money <span className="text-signal-violet">{whenPhrase(ladder, zones)}</span>.
                 </>
-              }
-              strong
-            />
-            <Row label="What it buys" value={<>{usd(quote.legs.reduce((a, l) => a + l.usd, 0))} of contracts</>} />
-            <Row label="Gemini fees" value={<>{usd(quote.feesUsd)} <span className="text-slate">· included above</span></>} />
-            {keeps && (
+              ) : (
+                <>At this setting your money barely moves.</>
+              )}
+            </Dialog.Description>
+
+            {/* The numbers that matter, as tiles */}
+            <div className="mt-2 grid grid-cols-2 gap-1.5 rounded-[20px] bg-cloud p-1.5">
+              <Tile compact label="You pay" value={usd(pay)} sub={keeps ? `of your ${usd(stake)}` : "test USDC"} />
+              {protection ? (
+                <>
+                  <Tile compact label="Pays out" value={protection.floor ? `up to ${usd(quote.maxPayout)}` : usd(protection.backInMiddle ?? quote.maxPayout)} sub={protection.floor ? `if it ends below ${protection.floor}` : `if it stays below ${protection.cap}`} />
+                  <Tile compact label="If it expires" value={`−${usd(stake)}`} sub={protection.floor ? `at ${protection.floor} or above` : "the most it costs"} />
+                  <Tile compact label="Chance it pays" value={pct(protection.chancePays)} sub="by the market's odds" />
+                </>
+              ) : (
+                <>
+                  <Tile compact label="Best case" value={<span className="text-gain">+{dollars(quote.maxPayout - stake)}</span>} sub={`${usd(quote.maxPayout - kept)} paid out`} />
+                  <Tile compact label="Worst case" value={`−${dollars(stake - quote.minPayout)}`} sub={`${usd(quote.minPayout - kept)} paid back`} />
+                  <Tile compact label="Chance of profit" value={pct(chance)} sub="by the market's odds" />
+                </>
+              )}
+            </div>
+
+            {/* The details behind them */}
+            <dl className="mt-2 rounded-[20px] bg-cloud px-4 py-0.5 text-[14px]">
               <Row
-                label="Not needed"
-                value={
-                  <>
-                    {usd(kept)}{" "}
-                    <span className="text-slate">
-                      · {confidence !== null && confidence < 1 ? `following your view at ${pct(confidence)} puts in less` : "the closest match to your view uses less"}
-                    </span>
-                  </>
-                }
+                label={protection ? "Protection" : "Your view"}
+                value={viewLabel.split(" · ").map((part, i) => (
+                  <span key={i}>
+                    {i > 0 && " · "}
+                    {part}
+                  </span>
+                ))}
               />
-            )}
-            {protection ? (
-              <>
-                {protection.floor && (
+              {confidence !== null && <Row label="Follows your view" value={confidence >= 1 ? "100% · full match" : `${pct(confidence)} · safer`} />}
+              <Row label="What it buys" value={<>{usd(quote.legs.reduce((a, l) => a + l.usd, 0))} of contracts</>} />
+              <Row label="Gemini fees" value={<>{usd(quote.feesUsd)} <span className="text-slate">· included</span></>} />
+              {keeps && (
+                <Row
+                  label="Not needed"
+                  value={
+                    <>
+                      {usd(kept)} <span className="text-slate">· {confidence !== null && confidence < 1 ? "following your view less puts in less" : "the closest match uses less"}</span>
+                    </>
+                  }
+                />
+              )}
+              {protection?.cap && protection.backInMiddle !== undefined && (
+                <>
                   <Row
-                    label="Pays out"
+                    label={protection.floor ? `Ends ${protection.floor}–${protection.cap}` : `Stays below ${protection.cap}`}
                     value={
-                      <>
-                        up to <span className="font-bold">{usd(quote.maxPayout)}</span> <span className="text-slate">· if it ends below {protection.floor}</span>
-                      </>
+                      protection.backInMiddle >= stake ? (
+                        <>
+                          {usd(protection.backInMiddle)} back · <span className="font-bold text-gain">income {usd(protection.backInMiddle - stake)}</span>
+                        </>
+                      ) : (
+                        <>
+                          {usd(protection.backInMiddle)} back · <span className="font-bold">net cost {usd(stake - protection.backInMiddle)}</span>
+                        </>
+                      )
                     }
                   />
-                )}
-                {protection.cap && protection.backInMiddle !== undefined ? (
-                  <>
-                    <Row
-                      label={protection.floor ? `If it ends ${protection.floor}–${protection.cap}` : `If it stays below ${protection.cap}`}
-                      value={
-                        protection.backInMiddle >= stake ? (
-                          <>
-                            {usd(protection.backInMiddle)} back · <span className="font-bold text-gain">income {usd(protection.backInMiddle - stake)}</span>
-                          </>
-                        ) : (
-                          <>
-                            {usd(protection.backInMiddle)} back · <span className="font-bold">net cost {usd(stake - protection.backInMiddle)}</span>
-                          </>
-                        )
-                      }
-                    />
-                    <Row label={`Gains above ${protection.cap}`} value={<>given up, up to {protection.capTop}</>} />
-                  </>
-                ) : (
-                  <>
-                    <Row label={`If it stays above ${protection.floor}`} value={<>expires · <span className="font-bold">−{usd(stake)}</span></>} />
-                    <Row label="Chance it pays out" value={`${pct(protection.chancePays)} by the market's odds`} />
-                  </>
-                )}
-              </>
-            ) : (
-              <>
-                <Row
-                  label="Best case"
-                  value={
-                    <>
-                      <span className="font-bold text-gain">+{dollars(quote.maxPayout - stake)}</span>{" "}
-                      <span className="text-slate">· {usd(quote.maxPayout - kept)} paid out</span>
-                    </>
-                  }
-                />
-                <Row
-                  label="Worst case"
-                  value={
-                    <>
-                      <span className="font-bold">−{dollars(stake - quote.minPayout)}</span> <span className="text-slate">· {usd(quote.minPayout - kept)} paid back</span>
-                    </>
-                  }
-                />
-                <Row label="Chance of profit" value={`${pct(chance)} by the market's odds`} />
-              </>
-            )}
-          </dl>
+                  <Row label={`Gains above ${protection.cap}`} value={<>given up, up to {protection.capTop}</>} />
+                </>
+              )}
+            </dl>
 
-          <div className="mt-6 border-t border-mist pt-5">
-            <p className="stat-label">When you confirm</p>
-            {walletKey && payTo ? (
-              <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
-                <Step n={1}>
-                  Your wallet signs one transaction that sends {usd(pay)} USDC straight to Contour&apos;s account <span className="tnum font-bold">{short(payTo, 4)}</span>.
-                  {keeps && <> The other {usd(kept)} isn&apos;t used.</>}
-                </Step>
-              </ol>
-            ) : walletKey ? (
-              <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
-                <Step n={1}>
-                  Your wallet signs one transaction that locks {usd(pay)} and this exact payout schedule on Solana.
-                  {keeps && <> The other {usd(kept)} isn&apos;t used.</>}
-                </Step>
-                <Step n={2}>
-                  The desk buys {quote.legs.length} {quote.legs.length === 1 ? "contract" : "contracts"} to back it. If it doesn&apos;t accept within minutes, you can cancel for a full
-                  refund.
-                </Step>
-                <Step n={3}>When the market settles, you&apos;re paid by the schedule automatically. Nothing to sell, nothing to watch.</Step>
-              </ol>
-            ) : (
-              <ol className="mt-3 flex flex-col gap-3 text-[15px] text-inkstone">
-                <Step n={1}>
-                  {quote.legs.length} {quote.legs.length === 1 ? "contract fills" : "contracts fill"} at Gemini&apos;s live asks, about {usd(pay)} from your paper cash.
-                  {keeps && <> The other {usd(kept)} isn&apos;t needed, so it stays in your cash.</>}
-                </Step>
-                <Step n={2}>The position goes into your portfolio, under Record, valued at what it would sell for now. Buy more or sell any of it before it settles.</Step>
-                <Step n={3}>When the market settles, each winning contract pays $1 into your paper cash.</Step>
-              </ol>
-            )}
+            <div className="mt-4">
+              <p className="text-[12.5px] uppercase tracking-[0.075em] text-smoke">When you confirm</p>
+              {payTo ? (
+                <ol className="mt-2.5 flex flex-col gap-2.5 text-[14px] text-inkstone">
+                  <Step n={1}>
+                    Your wallet signs one transaction that sends <b className="tnum">{usd(pay)}</b> test USDC straight to Contour&apos;s account{" "}
+                    <span className="tnum font-bold">{short(payTo, 4)}</span>.{keeps && <> The other {usd(kept)} isn&apos;t used.</>}
+                  </Step>
+                  <Step n={2}>The position shows up in your portfolio right away, valued live, with the transaction to follow on the Solana Explorer.</Step>
+                </ol>
+              ) : (
+                <ol className="mt-2.5 flex flex-col gap-2.5 text-[14px] text-inkstone">
+                  <Step n={1}>
+                    Your wallet signs one transaction that locks {usd(pay)} and this exact payout schedule on Solana.
+                    {keeps && <> The other {usd(kept)} isn&apos;t used.</>}
+                  </Step>
+                  <Step n={2}>
+                    The desk buys {quote.legs.length} {quote.legs.length === 1 ? "contract" : "contracts"} to back it. If it doesn&apos;t accept within minutes, you can cancel for a
+                    full refund.
+                  </Step>
+                  <Step n={3}>When the market settles, you&apos;re paid by the schedule automatically. Nothing to sell, nothing to watch.</Step>
+                </ol>
+              )}
+            </div>
           </div>
 
-          {/* No "I understand I could lose…" checkbox: the worst case is in the summary above, and a
-              trading app doesn't make you sign it twice. A cap's trade-off isn't obvious, so it gets a plain line. */}
-          {protection?.cap && protection.backInMiddle !== undefined && (
-            <p className="mt-5 text-[13.5px] leading-snug text-slate">
-              Above {protection.cap} you give up gains (up to {protection.capTop}): the higher it ends past {protection.cap}, the less this position pays back, as little
-              as {usd(quote.minPayout)}, while what you hold is worth more.
+          {/* Footer: the risk notice and the button, always in view */}
+          <div className="border-t border-mist px-6 pb-5 pt-3 md:px-7">
+            <p className="rounded-[16px] bg-cloud px-4 py-2.5 text-[13.5px] leading-snug text-slate">
+              Prediction markets are volatile and prices can move fast. Only trade what you can afford to lose. Not investment advice.
             </p>
-          )}
-
-          <ConfirmBlock ladder={ladder} server={server} stake={pay} payTo={payTo} quoteErr={quoteErr} age={age} viewLabel={viewLabel} />
-          <Dialog.Close className="btn btn-quiet btn-block mt-3">Back to edit</Dialog.Close>
-          <p className="mt-4 text-center text-[12px] leading-snug text-smoke">
-            Prediction markets are volatile and prices can move fast. Only trade what you can afford to lose. Not investment advice.
-          </p>
+            <ConfirmBlock ladder={ladder} server={server} stake={pay} payTo={payTo} quoteErr={quoteErr} age={age} />
+            <Dialog.Close className="mt-1 w-full rounded-full py-1.5 text-[14px] font-bold text-slate hover:bg-cloud hover:text-inkstone">Back to edit</Dialog.Close>
+          </div>
         </Dialog.Content>
       </Dialog.Portal>
     </Dialog.Root>
@@ -254,17 +209,19 @@ export function ReviewDialog({
 
 function Row({ label, value, strong }: { label: string; value: React.ReactNode; strong?: boolean }) {
   return (
-    <>
-      <dt className="text-slate">{label}</dt>
-      <dd className={`tnum text-right text-inkstone ${strong ? "font-bold" : ""}`}>{value}</dd>
-    </>
+    <div className="flex items-baseline justify-between gap-4 border-t border-mist py-2 first:border-t-0">
+      <dt className="shrink-0 whitespace-nowrap text-slate">{label}</dt>
+      <dd className={`tnum min-w-0 text-right text-inkstone ${strong ? "font-bold" : ""}`}>{value}</dd>
+    </div>
   );
 }
 
 function Step({ n, children }: { n: number; children: React.ReactNode }) {
   return (
     <li className="flex gap-3">
-      <span className="tnum flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-cloud text-[13px] font-bold text-signal-violet">{n}</span>
+      <span className="tnum mt-px flex h-[22px] w-[22px] shrink-0 items-center justify-center rounded-full bg-signal-violet text-[12px] font-bold text-white" aria-hidden="true">
+        {n}
+      </span>
       <span>{children}</span>
     </li>
   );
@@ -288,101 +245,11 @@ function ConfirmBlock({
   payTo,
   quoteErr,
   age,
-  viewLabel,
 }: {
   ladder: Ladder;
   server: StoredQuote | null;
   stake: number;
   /** Demo direct-payment mode: send the USDC straight to this wallet instead of opening an escrow. */
-  payTo: string | null;
-  quoteErr: string | null;
-  age: number | null;
-  viewLabel: string;
-}) {
-  const { publicKey } = useWallet();
-  // No wallet: the trade goes into this browser's paper portfolio, filled at Gemini's live prices.
-  if (!publicKey) return <PaperConfirm ladder={ladder} server={server} stake={stake} quoteErr={quoteErr} age={age} viewLabel={viewLabel} />;
-  return <WalletConfirm ladder={ladder} server={server} stake={stake} payTo={payTo} quoteErr={quoteErr} age={age} />;
-}
-
-/** The paper stand-in for signing: fill the reviewed desk quote into the paper portfolio and open the position. */
-function PaperConfirm({
-  ladder,
-  server,
-  stake,
-  quoteErr,
-  age,
-  viewLabel,
-}: {
-  ladder: Ladder;
-  server: StoredQuote | null;
-  stake: number;
-  quoteErr: string | null;
-  age: number | null;
-  viewLabel: string;
-}) {
-  const router = useRouter();
-  const qc = useQueryClient();
-  const { account, data: portfolio } = usePortfolio();
-  const [dialog, setDialog] = useState(false);
-  const [busy, setBusy] = useState(false);
-  const [err, setErr] = useState<string | null>(null);
-  const cash = portfolio?.totals.cashUsd;
-  const short = cash !== undefined && cash < stake;
-
-  async function place() {
-    if (!account || !server) return;
-    setBusy(true);
-    setErr(null);
-    try {
-      const pos = await desk.paperOpen(account, { quoteId: server.quoteId, label: viewLabel });
-      await qc.invalidateQueries({ queryKey: ["paper", account] });
-      router.push(`/portfolio/${pos.id}?opened=1`);
-    } catch (e) {
-      setErr((e as Error).message);
-      setBusy(false);
-    }
-  }
-
-  const label = busy ? "Placing your trade…" : !server ? "Waiting for desk quote…" : short ? "Not enough paper cash" : `Place paper trade · ${usd(stake)}`;
-  return (
-    <div className="mt-5 flex flex-col gap-3">
-      <button className="btn btn-primary btn-block" disabled={busy || !server || !account || short} onClick={place}>
-        {label}
-      </button>
-      <p className="text-[14px] text-smoke">
-        {quoteErr
-          ? `Desk quote failed: ${quoteErr}`
-          : server
-            ? `Desk quote · ${age}s ago · fills at Gemini's live asks, within 1¢ of this quote`
-            : "Preview computed in your browser; desk quote pending."}
-        {cash !== undefined ? ` · Paper cash ${usd(cash)}` : ""}
-        {` · Settles ${settleLabel(ladder.expiry)}`}
-      </p>
-      {err && <p className="rounded-2xl bg-porcelain px-4 py-3 text-[14px] text-inkstone">{err}</p>}
-      <p className="text-[13px] text-smoke">
-        Paper trading: no real money moves, and positions live in this browser&apos;s portfolio.{" "}
-        <button type="button" className="font-bold text-signal-violet underline decoration-2 underline-offset-4 hover:text-inkstone" onClick={() => setDialog(true)}>
-          Connect a wallet
-        </button>{" "}
-        to lock it on Solana instead.
-      </p>
-      <WalletDialog open={dialog} onOpenChange={setDialog} />
-    </div>
-  );
-}
-
-function WalletConfirm({
-  ladder,
-  server,
-  stake,
-  payTo,
-  quoteErr,
-  age,
-}: {
-  ladder: Ladder;
-  server: StoredQuote | null;
-  stake: number;
   payTo: string | null;
   quoteErr: string | null;
   age: number | null;
@@ -443,7 +310,7 @@ function WalletConfirm({
       setBusy("Saving your position…");
       try {
         const { position } = await desk.recordPayment({ signature: sig, forecastHash: server.forecastHash, owner: publicKey.toBase58() });
-        await qc.invalidateQueries({ queryKey: ["record"] });
+        await qc.invalidateQueries({ queryKey: ["wallet-portfolio"] });
         router.push(`/p/${position}`);
       } catch (e) {
         setPaid({ sig, amount: Number(amount) / 1e6, to: payTo, problem: (e as Error).message });
@@ -519,11 +386,11 @@ function WalletConfirm({
     );
 
   return (
-    <div className="mt-5 flex flex-col gap-3">
+    <div className="mt-3 flex flex-col gap-2">
       <button className="btn btn-primary btn-block" disabled={disabled} onClick={() => action?.()}>
         {label}
       </button>
-      <p className="text-[14px] text-smoke">
+      <p className="text-center text-[12.5px] text-smoke">
         {quoteErr
           ? `Desk quote failed: ${quoteErr}`
           : server
