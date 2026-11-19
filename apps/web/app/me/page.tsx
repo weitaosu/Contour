@@ -12,6 +12,8 @@ import { short, signed, usd } from "@/lib/format";
 import { ReplayChart } from "@/components/charts/ReplayChart";
 import { FOCUS_PANEL, Panel, StepBadge } from "@/components/forecast/Panel";
 import { Tile } from "@/components/forecast/ProfitCard";
+import { PortfolioScreen } from "@/components/portfolio/PortfolioScreen";
+import { Segmented } from "@/components/ui/Segmented";
 
 /** Worked examples of the score, so the number on this page means something before you have one. */
 const EXAMPLES = [
@@ -198,11 +200,34 @@ function RecordPageContent() {
   );
 }
 
-/** The page, animated in and out on navigation. */
+type View = "portfolio" | "forecasts";
+const VIEWS: { value: View; label: string }[] = [
+  { value: "portfolio", label: "Portfolio" },
+  { value: "forecasts", label: "Forecast record" },
+];
+
+/**
+ * The Record tab: what you hold (the paper portfolio, valued live) and how your forecasts scored.
+ * ?view=forecasts opens the forecast record; the portfolio is the default.
+ */
 export default function RecordPage() {
+  const [view, setView] = useState<View>("portfolio");
+  useEffect(() => {
+    if (new URLSearchParams(window.location.search).get("view") === "forecasts") setView("forecasts");
+  }, []);
+  const pick = (v: View) => {
+    setView(v);
+    const url = new URL(window.location.href);
+    if (v === "forecasts") url.searchParams.set("view", v);
+    else url.searchParams.delete("view");
+    window.history.replaceState(null, "", url);
+  };
   return (
     <PageTransition>
-      <RecordPageContent />
+      <div className="mx-auto w-full max-w-[1680px] px-4 pt-5 md:px-6">
+        <Segmented options={VIEWS} value={view} onChange={pick} label="Record" />
+      </div>
+      {view === "portfolio" ? <PortfolioScreen embedded /> : <RecordPageContent />}
     </PageTransition>
   );
 }
