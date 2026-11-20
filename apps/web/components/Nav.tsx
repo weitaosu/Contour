@@ -54,10 +54,8 @@ export function Nav() {
   const path = usePathname();
   const cfg = useQuery({ queryKey: ["config"], queryFn: desk.config, staleTime: 60_000 });
   const mode = cfg.data?.executionMode ?? "paper";
-  // The front page and market pages are full-width workspaces; the bar lines up with them there.
-  // The landing page at / renders its own nav.
-  if (path === "/") return null;
-  const wide = path.startsWith("/markets") || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/portfolio") || path.startsWith("/p/");
+  // The landing page and the app pages are full-width workspaces; the bar lines up with them there.
+  const wide = path === "/" || path.startsWith("/markets") || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/portfolio") || path.startsWith("/p/");
   return (
     // Named, so page transitions leave it in place: the content moves, the bar stays.
     <header className="sticky top-0 z-30 border-b border-mist bg-canvas/90 backdrop-blur-md" style={{ viewTransitionName: "site-header" }}>

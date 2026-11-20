@@ -56,17 +56,17 @@ export function TradeoffVisual() {
     <div ref={ref} className="w-full max-w-[400px]">
       <Card className="grid grid-cols-3 gap-3 px-5 py-6 sm:px-7 sm:py-8">
         <div className="min-w-0">
-          <p className="text-[12px] text-[#70707d] sm:text-[13px]">Your budget</p>
+          <p className="whitespace-nowrap text-[12px] text-[#70707d] sm:text-[13px]">Budget</p>
           <p className="tnum mt-2 text-[22px] font-semibold leading-none text-[#010110] sm:text-[26px]">$100</p>
         </div>
         <div className="min-w-0">
-          <p className="text-[12px] text-[#70707d] sm:text-[13px]">Maximum loss</p>
+          <p className="whitespace-nowrap text-[12px] text-[#70707d] sm:text-[13px]">Max loss</p>
           <p className="mt-2 text-[22px] font-semibold leading-none sm:text-[26px]" style={{ color: LOSS }}>
             <AnimatedNumber value={t.loss} format={dollars} />
           </p>
         </div>
         <div className="min-w-0">
-          <p className="text-[12px] text-[#70707d] sm:text-[13px]">Maximum profit</p>
+          <p className="whitespace-nowrap text-[12px] text-[#70707d] sm:text-[13px]">Max profit</p>
           <p className="mt-2 text-[22px] font-semibold leading-none sm:text-[26px]" style={{ color: GAIN }}>
             +<AnimatedNumber value={t.profit} format={dollars} />
           </p>

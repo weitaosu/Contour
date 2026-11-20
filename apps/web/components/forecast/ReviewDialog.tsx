@@ -17,6 +17,8 @@ import { isWin, runs, whenPhrase } from "@/lib/outcomes";
 import { WalletDialog } from "@/components/WalletButton";
 import { FOCUS_PANEL } from "@/components/forecast/Panel";
 import { Tile } from "@/components/forecast/ProfitCard";
+import { s as lp } from "@/components/landing/styles";
+import { fontVars } from "@/components/landing/fonts";
 
 const dollars = (n: number) => usd(n, Math.abs(n) >= 100 ? 0 : 2);
 const sol = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL`;
@@ -83,12 +85,16 @@ export function ReviewDialog({
     >
       <Dialog.Portal>
         <Dialog.Overlay className="fade-in fixed inset-0 z-40 bg-black/50 backdrop-blur-[2px]" />
-        <Dialog.Content className="fade-up fixed inset-x-0 bottom-0 z-50 flex max-h-[92vh] flex-col overflow-hidden rounded-t-[32px] bg-porcelain shadow-[0_24px_64px_-24px_rgba(0,0,0,0.45)] md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:w-[min(600px,calc(100vw-32px))] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[32px]">
+        {/* In the market page's look (lp-app), since the portal renders outside that page's wrapper. On wide
+            screens it's two columns, so the whole review fits on a laptop screen without scrolling. */}
+        <Dialog.Content
+          className={`${lp.root} ${lp.app} ${fontVars} fade-up fixed inset-x-0 bottom-0 z-50 flex max-h-[calc(100dvh-24px)] flex-col overflow-hidden rounded-t-[20px] bg-porcelain shadow-[0_24px_64px_-24px_rgba(0,0,0,0.45)] md:inset-x-auto md:bottom-auto md:left-1/2 md:top-1/2 md:max-h-[calc(100dvh-48px)] md:w-[min(600px,calc(100vw-32px))] md:-translate-x-1/2 md:-translate-y-1/2 md:rounded-[20px] lg:w-[min(980px,calc(100vw-64px))]`}
+        >
           {/* Header: stays put while the details scroll */}
           <div className="flex items-start justify-between gap-4 px-6 pb-3 pt-6 md:px-7">
             <div className="min-w-0">
-              <p className="text-[12.5px] uppercase tracking-[0.075em] text-smoke">{confidence === null ? "Review your protection" : "Review your hedge"}</p>
-              <Dialog.Title className="mt-1.5 text-[24px] font-bold leading-tight text-inkstone">{ladder.title}</Dialog.Title>
+              <p className="text-[13.5px] text-smoke">{confidence === null ? "Review your protection" : "Review your hedge"}</p>
+              <Dialog.Title className="mt-1 text-[28px] leading-tight text-inkstone">{ladder.title}</Dialog.Title>
               <p className="mt-1 text-[13.5px] text-slate">Settles {settleLabel(ladder.expiry)}</p>
             </div>
             <Dialog.Close className="-mr-2 rounded-full p-2 text-slate hover:bg-cloud" aria-label="Close">
@@ -97,8 +103,10 @@ export function ReviewDialog({
           </div>
 
           {/* Scrolls on small screens without showing a scrollbar; the fade at the bottom says there's more. */}
-          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pb-5 pt-1.5 [mask-image:linear-gradient(to_bottom,#000_calc(100%-20px),transparent)] [scrollbar-width:none] md:px-7 [&::-webkit-scrollbar]:hidden" data-scroll-body>
-            <Dialog.Description className={`rounded-[20px] px-5 py-3 text-[17px] font-bold leading-snug text-inkstone ${FOCUS_PANEL}`}>
+          <div className="min-h-0 flex-1 overflow-y-auto overflow-x-hidden px-6 pb-5 pt-1.5 [mask-image:linear-gradient(to_bottom,#000_calc(100%-20px),transparent)] [scrollbar-width:none] md:px-7 lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-6 [&::-webkit-scrollbar]:hidden" data-scroll-body>
+            {/* left on wide screens: the outcome in one line and the numbers that matter */}
+            <div className="min-w-0">
+            <Dialog.Description className={`rounded-[24px] px-5 py-3 text-[17px] font-bold leading-snug text-inkstone ${FOCUS_PANEL}`}>
               {headline ? (
                 headline
               ) : zones.length ? (
@@ -111,7 +119,7 @@ export function ReviewDialog({
             </Dialog.Description>
 
             {/* The numbers that matter, as tiles */}
-            <div className="mt-2 grid grid-cols-2 gap-1.5 rounded-[20px] bg-cloud p-1.5">
+            <div className="mt-2 grid grid-cols-2 gap-1.5 rounded-[24px] bg-cloud p-1.5">
               <Tile compact label="You pay" value={usd(pay)} sub={payTo ? (solPay !== null ? `≈ ${sol(solPay)} on devnet` : "in devnet SOL") : keeps ? `of your ${usd(stake)}` : "test USDC"} />
               {protection ? (
                 <>
@@ -128,8 +136,11 @@ export function ReviewDialog({
               )}
             </div>
 
-            {/* The details behind them */}
-            <dl className="mt-2 rounded-[20px] bg-cloud px-4 py-0.5 text-[14px]">
+            </div>
+
+            {/* right on wide screens: the details behind them, and what happens on confirm */}
+            <div className="min-w-0">
+            <dl className="mt-2 rounded-[24px] bg-cloud px-4 py-0.5 text-[14px] lg:mt-0">
               <Row
                 label={protection ? "Protection" : "Your view"}
                 value={viewLabel.split(" · ").map((part, i) => (
@@ -174,7 +185,7 @@ export function ReviewDialog({
             </dl>
 
             <div className="mt-4">
-              <p className="text-[12.5px] uppercase tracking-[0.075em] text-smoke">When you confirm</p>
+              <p className="text-[13.5px] text-smoke">When you confirm</p>
               {payTo ? (
                 <ol className="mt-2.5 flex flex-col gap-2.5 text-[14px] text-inkstone">
                   <Step n={1}>
@@ -204,15 +215,18 @@ export function ReviewDialog({
                 </ol>
               )}
             </div>
+            </div>
           </div>
 
           {/* Footer: the risk notice and the button, always in view */}
-          <div className="border-t border-mist px-6 pb-5 pt-3 md:px-7">
-            <p className="rounded-[16px] bg-cloud px-4 py-2.5 text-[13.5px] leading-snug text-slate">
+          <div className="border-t border-mist px-6 pb-5 pt-3 md:px-7 lg:grid lg:grid-cols-2 lg:items-start lg:gap-x-6 lg:pt-4">
+            <p className="rounded-[18px] bg-cloud px-4 py-2.5 text-[13.5px] leading-snug text-slate">
               Prediction markets are volatile and prices can move fast. Only trade what you can afford to lose. Not investment advice.
             </p>
-            <ConfirmBlock ladder={ladder} server={server} stake={pay} payTo={payTo} quoteErr={quoteErr} age={age} />
-            <Dialog.Close className="mt-1 w-full rounded-full py-1.5 text-[14px] font-bold text-slate hover:bg-cloud hover:text-inkstone">Back to edit</Dialog.Close>
+            <div className="min-w-0">
+              <ConfirmBlock ladder={ladder} server={server} stake={pay} payTo={payTo} quoteErr={quoteErr} age={age} />
+              <Dialog.Close className="mt-1 w-full rounded-full py-1.5 text-[14px] font-medium text-slate hover:bg-cloud hover:text-inkstone">Back to edit</Dialog.Close>
+            </div>
           </div>
         </Dialog.Content>
       </Dialog.Portal>
@@ -389,7 +403,7 @@ function ConfirmBlock({
 
   if (paid)
     return (
-      <div className="mt-5 flex flex-col gap-2 rounded-[20px] bg-cloud px-5 py-4 text-[15px] text-inkstone" role="status">
+      <div className="mt-5 flex flex-col gap-2 rounded-[24px] bg-cloud px-5 py-4 text-[15px] text-inkstone lg:mt-0" role="status">
         <p className="flex items-center gap-2 font-bold">
           <Check size={18} strokeWidth={3} className="text-gain" aria-hidden="true" /> Paid {sol(paid.amount)} to {short(paid.to, 4)}
         </p>
@@ -401,7 +415,7 @@ function ConfirmBlock({
     );
 
   return (
-    <div className="mt-3 flex flex-col gap-2">
+    <div className="mt-3 flex flex-col gap-2 lg:mt-0">
       <button className="btn btn-primary btn-block" disabled={disabled} onClick={() => action?.()}>
         {label}
       </button>

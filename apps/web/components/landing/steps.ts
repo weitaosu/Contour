@@ -8,21 +8,21 @@ export const STEPS = [
   {
     title: "Pick a market",
     short: "crypto, sports, weather and more, below",
-    body: "Trade across crypto, sports, weather, and more on Gemini Prediction Markets.",
+    body: "Sports, crypto, commodities and more, live from Gemini Prediction Markets. The grey curve shows where traders expect the outcome to land.",
   },
   {
     title: "Shape your view",
     short: "draw where it lands and how sure you are",
-    body: "Draw a curve around where you expect the outcome to land and how confident you are. Contour selects and sizes contracts to express your view.",
+    body: "Pick what you expect to happen, then drag your curve over the range you believe in. Contour picks the contracts and sizes them for you.",
   },
   {
     title: "See what you make",
     short: "the most you can make and lose",
-    body: "Understand the most you can make and lose, your chance of profit, and the contracts you’d buy at Gemini’s prices.",
+    body: "Your payout in every outcome updates as you shape the curve: the most you can make, the most you can lose, and your chance of profit.",
   },
   {
     title: "Review your trade",
     short: "sign once to lock the payout on Solana",
-    body: "Read a plain summary of what you pay and the best and worst case. Sign with your wallet to lock the payout on Solana.",
+    body: "Review the order and confirm it from your wallet. Your portfolio then shows open positions, past trades and live P&L, and you can close early any time.",
   },
 ] as const;
