@@ -64,10 +64,6 @@ const CONFIDENCE_LEVELS = [1, 0.75, 0.5] as const;
 const CONFIDENCE_NAMES = ["full match", "a little safer", "much safer"] as const;
 const DEFAULT_CONFIDENCE = 1;
 const presetIndex = (c: number) => CONFIDENCE_LEVELS.findIndex((l) => Math.abs(l - c) < 1e-9);
-const confidenceName = (c: number) => {
-  const i = presetIndex(c);
-  return i >= 0 ? CONFIDENCE_NAMES[i] : c < 0.5 ? "custom · very safe" : "custom · safer";
-};
 
 export interface Preset { c?: number; w?: number; x?: number; s?: number }
 
@@ -702,11 +698,6 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
             {spot && <LivePrice compact spot={spot} name={name || ladder.eventTicker.replace(/\d.*$/, "")} settles={settlesText} />}
           </div>
         </div>
-        <div className="flex flex-wrap gap-2">
-          <span className="tag tnum !py-0.5 !text-[13px]">{ladder.kind === "threshold" ? `${ladder.strikes.length} strikes` : `${ladder.marketProb.length} outcomes`}</span>
-          <span className="tag tnum !py-0.5 !text-[13px]">{ladder.quoted.filter(Boolean).length} quoted</span>
-          {ladder.crossed.some(Boolean) && <span className="tag !py-0.5 !text-[13px]">Crossed quotes not traded</span>}
-        </div>
       </header>
 
       {/* The workspace. Every panel is as tall as its content: nothing scrolls inside a panel or
@@ -1195,7 +1186,7 @@ function ConfidencePicker({ value, onChange, onOther }: { value: number; onChang
               type="button"
               role="radio"
               aria-checked={on}
-              aria-label={`Follow your view ${Math.round(level * 100)} percent, ${CONFIDENCE_NAMES[i]}`}
+              aria-label={`Confidence ${Math.round(level * 100)} percent, ${CONFIDENCE_NAMES[i]}`}
               tabIndex={on ? 0 : -1}
               onClick={() => onChange(level)}
               className={segClass(on)}
@@ -1219,11 +1210,6 @@ function ConfidencePicker({ value, onChange, onOther }: { value: number; onChang
         >
           {custom ? pct(value) : "Other"}
         </button>
-      </div>
-      <div className="flex justify-between gap-2 text-[13px] text-smoke">
-        <span>Full match</span>
-        <span className="text-slate">{value < 1 ? confidenceName(value) : ""}</span>
-        <span>Safer</span>
       </div>
     </div>
   );

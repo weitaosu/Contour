@@ -1,20 +1,22 @@
 "use client";
 
-import { smoothScrollToElement } from "@/lib/scroll";
 import { PageTransition } from "@/components/PageTransition";
 import { startTransition, useDeferredValue, useEffect, useMemo, useState, ViewTransition } from "react";
 import Link from "next/link";
 import { useQuery } from "@tanstack/react-query";
 import { compile, fromMarket, likelyRange, marketMoments, type Ladder } from "@contour/core";
-import { ArrowDown, ArrowRight, LineChart, Lock, Search, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, LineChart, Lock, Search, SlidersHorizontal } from "lucide-react";
 import { desk, type CategorySection, type MarketSummary } from "@/lib/desk";
 import exampleLadder from "@/lib/example-ladder.json";
 import { MarketCard } from "@/components/MarketCard";
+import { s as lp } from "@/components/landing/styles";
+import { fontVars } from "@/components/landing/fonts";
+import { STEPS } from "@/components/landing/steps";
 import { BackToTop } from "@/components/BackToTop";
 import { FrozenBanner } from "@/components/FrozenBanner";
 import { ProbabilityChart } from "@/components/charts/ProbabilityChart";
 import { ProfitChart } from "@/components/charts/ProfitChart";
-import { oneIn, Tile } from "@/components/forecast/ProfitCard";
+import { oneIn } from "@/components/forecast/ProfitCard";
 import { Fill, Panel, StepBadge } from "@/components/forecast/Panel";
 import { Accordion, AccordionItem } from "@/components/ui/Accordion";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
@@ -215,7 +217,7 @@ function CategoryBlock({ name, section, cards, search }: { name: string; section
     <div id={slug(name)} className="scroll-mt-24">
       <div className="flex flex-wrap items-end justify-between gap-x-6 gap-y-1 px-1 pb-2.5 pt-4">
         <div className="min-w-0">
-          <h3 className="text-[20px] font-bold leading-tight text-inkstone">{name}</h3>
+          <h3 className="text-[24px] leading-tight text-inkstone">{name}</h3>
           {sub && <p className="mt-0.5 text-[13.5px] text-slate">{sub}</p>}
         </div>
         {section && (
@@ -288,7 +290,6 @@ function SectionsPanel({
       <h2 className="flex items-center gap-2 text-[16px] font-bold leading-tight text-inkstone">
         <StepBadge n={1} /> Pick a market
       </h2>
-      <p className="mt-1 text-[13px] leading-snug text-slate">Every section of Gemini, busiest first. Bars show what traded in the last 24 hours.</p>
       <label className="relative mt-3 block">
         <Search size={16} strokeWidth={1.75} className="pointer-events-none absolute left-3.5 top-1/2 -translate-y-1/2 text-smoke" />
         <input
@@ -393,7 +394,6 @@ function HomeContent() {
   const filtered = listed.filter((m) => !query || `${m.title} ${m.ticker}`.toLowerCase().includes(query.toLowerCase()));
   const counts = new Map(cats.map((c) => [c, listed.filter((m) => m.category === c).length]));
   const shownCats = cats.filter((c) => !cat || c === cat);
-  const totalVolume24h = sections.reduce((s, x) => s + x.volume24h, 0);
   const pick = (c: string | null) => {
     // Bring the list's top into view first (instantly: the crossfade below hides the jump), then
     // swap sections inside a transition so the old list fades out as the new one rises in.
@@ -410,23 +410,19 @@ function HomeContent() {
       {/* Intro beside a live preview of the panels inside a market */}
       <div className="grid items-stretch gap-2 lg:grid-cols-[minmax(0,0.8fr)_minmax(0,1.45fr)]">
         <section className="flex min-w-0 flex-col rounded-[24px] bg-cloud p-5 xl:p-6">
-          <p className="text-[12.5px] uppercase tracking-[0.075em] text-smoke">Gemini prediction markets · locked on Solana</p>
-          <h1 className="mt-3 text-[34px] font-bold leading-[1.05] tracking-[0.01em] text-inkstone xl:text-[42px]">Trade your whole view.</h1>
+          <h1 className="text-[36px] leading-[1.08] text-inkstone xl:text-[46px]">
+            Trade your whole <span className="text-slate">view.</span>
+          </h1>
           <p className="mt-3 max-w-[520px] text-[15px] leading-relaxed text-slate">
-            Draw where you think an outcome will land. Contour buys the set of contracts that pays most where you and the market disagree, and locks the payout on-chain
-            before a single trade is placed.
+            Say where you think a market will land. Contour turns that view into one trade built from Gemini&apos;s YES/NO contracts, with the payout locked on Solana.
           </p>
+          {/* The same four steps as the landing page's "How it works" (steps.ts), in their short form. */}
           <ol className="mt-5 flex flex-col gap-2.5 text-[14px]">
-            {[
-              ["Pick a market", "any popular section of Gemini, below"],
-              ["Shape your view", "drag a curve, or rate each outcome"],
-              ["See what you make", "in every outcome, before you sign"],
-              ["Lock it on Solana", "the payouts are fixed before any trade"],
-            ].map(([t, d], i) => (
-              <li key={t} className="flex items-center gap-2.5">
+            {STEPS.map(({ title, short }, i) => (
+              <li key={title} className="flex items-center gap-2.5">
                 <StepBadge n={i + 1} />
                 <span>
-                  <b className="text-inkstone">{t}</b> <span className="text-slate">· {d}</span>
+                  <b className="text-inkstone">{title}</b> <span className="text-slate">· {short}</span>
                 </span>
               </li>
             ))}
@@ -441,25 +437,6 @@ function HomeContent() {
                 {offline ? "Live markets are unavailable right now" : "Loading markets…"}
               </span>
             )}
-            <a
-              href="#markets"
-              className="group btn btn-quiet !gap-1.5 !px-5 !py-2.5"
-              onClick={(e) => {
-                const el = document.getElementById("markets");
-                if (!el) return;
-                e.preventDefault();
-                smoothScrollToElement(el);
-                history.replaceState(null, "", "#markets");
-              }}
-            >
-              Browse markets{" "}
-              <ArrowDown size={16} strokeWidth={2} className="group-hover:translate-y-0.5" style={{ transition: "translate var(--spring-ms) var(--spring)" }} />
-            </a>
-          </div>
-          <div className="mt-auto grid grid-cols-3 gap-2 pt-6">
-            <Tile compact label="Tradable" value={q.data ? listed.length : "…"} sub="as one curve" />
-            <Tile compact label="Sections" value={q.data ? sections.length : "…"} sub="of Gemini" />
-            <Tile compact label="Traded" value={q.data ? volumeText(totalVolume24h) : "…"} sub="in the last 24h" />
           </div>
         </section>
         {featured || offline ? <LivePreview ticker={featured?.ticker ?? null} /> : <div className={`min-h-[420px] rounded-[24px] ${FOCUS}`} />}
@@ -561,10 +538,16 @@ function HomeContent() {
 }
 
 /** The page, animated in and out on navigation. */
+/**
+ * The page, animated in and out on navigation, in the landing page's style: (the nav and footer are the app's global ones),
+ * and the same palette, type and controls over the app's own pieces (see .lp-app in landing.css).
+ */
 export default function Markets() {
   return (
-    <PageTransition>
-      <HomeContent />
-    </PageTransition>
+    <div className={`${lp.root} ${lp.app} ${fontVars} overflow-x-clip`}>
+      <PageTransition>
+        <HomeContent />
+      </PageTransition>
+    </div>
   );
 }

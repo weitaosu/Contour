@@ -3,36 +3,19 @@
 import { useEffect, useId, useRef, useState, type ComponentType, type KeyboardEvent } from "react";
 import { OutlookVisual, PayoffVisual, ReviewVisual, SectionsVisual } from "./StepVisuals";
 import { s } from "./styles";
+import { STEPS as SHARED_STEPS } from "./steps";
 
 type Step = { title: string; body: string; Visual: ComponentType<{ running: boolean }>; label: string };
 
 /** Each step pairs with a live piece of the app: its section list, its two charts, its review summary. */
-const STEPS: Step[] = [
-  {
-    title: "Pick a market",
-    body: "Browse every popular section of Gemini, busiest first. Each card shows the odds and what a view on it could pay.",
-    Visual: SectionsVisual,
-    label: "Gemini sections ranked by what traded in the last 24 hours, with how many markets in each can be traded as one curve.",
-  },
-  {
-    title: "Choose your outlook",
-    body: "Say what will happen: higher, lower, stays near, a big move, or protect what you hold. Then drag the curve to set where and how sure.",
-    Visual: OutlookVisual,
-    label: "A forecast curve reshaping through example outlooks, drawn against the market's own curve.",
-  },
-  {
-    title: "Compare the payoff",
-    body: "See the most you can make and lose, where you profit, your chance of profit, and the exact contracts you'd buy at Gemini's prices.",
-    Visual: PayoffVisual,
-    label: "What $100 makes at every settlement price for each outlook, with the amount at risk, the most you can make and the chance of profit.",
-  },
-  {
-    title: "Review your bet",
-    body: "Read a plain summary of what you pay and the best and worst case, then sign once with your wallet to lock the payout on Solana.",
-    Visual: ReviewVisual,
-    label: "The review summary: when you make money, what you pay, the best and worst case, and the chance of profit.",
-  },
+/** The shared step wording (steps.ts), each paired with the live piece of the app it's about. */
+const VISUALS = [
+  { Visual: SectionsVisual, label: "Gemini sections ranked by what traded in the last 24 hours, with how many markets in each can be traded as one curve." },
+  { Visual: OutlookVisual, label: "A forecast curve reshaping through example outlooks, drawn against the market's own curve." },
+  { Visual: PayoffVisual, label: "What $100 makes at every settlement price for each outlook, with the amount at risk, the most you can make and the chance of profit." },
+  { Visual: ReviewVisual, label: "The review summary: when you make money, what you pay, the best and worst case, and the chance of profit." },
 ];
+const STEPS: Step[] = SHARED_STEPS.map((step, i) => ({ ...step, ...VISUALS[i] }));
 
 /** How long each step stays up while the selector advances on its own. */
 const ADVANCE_MS = 6500;
@@ -83,7 +66,7 @@ export function StepSelector() {
     // Wide screens: heading and steps on the left, the screen spanning both rows on the right.
     <div ref={root} className="flex flex-col gap-8 lg:grid lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)] lg:grid-rows-[auto_auto] lg:gap-x-20 lg:gap-y-[56px]">
       <h2 id={`${id}-title`} className={`${s.display} text-[clamp(32px,4vw,42px)] leading-[1.15] lg:col-start-1 lg:row-start-1 lg:self-end`}>
-        How it works. <span className="text-[#70707d]">From a market to a position in four steps.</span>
+        How it works.
       </h2>
       <div className="order-3 lg:order-none lg:col-start-1 lg:row-start-2">
         <div role="tablist" aria-labelledby={`${id}-title`} aria-orientation="vertical" onKeyDown={onKeyDown} className="flex flex-col">

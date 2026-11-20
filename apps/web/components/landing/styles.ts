@@ -7,6 +7,8 @@ import "./landing.css";
 
 export const s = {
   root: "lp-root",
+  /** App pages in the landing style: restyles the app's shared pieces inside it. */
+  app: "lp-app",
   display: "lp-display",
   pill: "lp-pill",
   pillDark: "lp-pillDark",

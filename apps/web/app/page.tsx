@@ -1,17 +1,14 @@
 import Image from "next/image";
 import Link from "next/link";
-import { DM_Sans, Inter } from "next/font/google";
 import { PageTransition } from "@/components/PageTransition";
 import { LandingFooter } from "@/components/landing/LandingFooter";
 import { LandingNav } from "@/components/landing/LandingNav";
 import { StepSelector } from "@/components/landing/StepSelector";
-import { Crosshair, Eye, Scale, ShieldCheck } from "lucide-react";
+import { ConfidenceVisual, OutcomesVisual, TradeoffVisual, ViewVisual } from "@/components/landing/FeatureVisuals";
 import { s } from "@/components/landing/styles";
+import { fontVars } from "@/components/landing/fonts";
 import marketsShot from "@/public/landing/markets-desktop.png";
 
-// A regular-weight grotesk for display, Inter for everything you read or press.
-const display = DM_Sans({ subsets: ["latin"], weight: ["400"], variable: "--font-landing-display", display: "swap" });
-const body = Inter({ subsets: ["latin"], weight: ["300", "400", "500"], variable: "--font-landing-body", display: "swap" });
 
 /** Every strategy starts from a market, so the calls to action open the market browser. */
 const DEMO_HREF = "/markets";
@@ -20,29 +17,29 @@ const POINTS = [
   {
     title: "Increase upside, limit downside",
     body: "Choose the balance between potential returns and protection. See what you could gain, what you could lose, and what the tradeoff costs.",
-    icon: Scale,
+    Visual: TradeoffVisual,
   },
   {
     title: "Express views more precisely",
     body: "Expect a modest rise, a narrow range, or a big move? Build a position around your forecast, with contracts selected and sized together.",
-    icon: Crosshair,
+    Visual: ViewVisual,
   },
   {
     title: "See every outcome",
     body: "Before you commit, see what you'd make or lose at every price the market could settle at, and how likely each result is.",
-    icon: Eye,
+    Visual: OutcomesVisual,
   },
   {
     title: "Hedge, don’t guess",
     body: "Add protection to an existing holding. Compare the position alone with the strategy added, and see how the results change across outcomes.",
-    icon: ShieldCheck,
+    Visual: ConfidenceVisual,
   },
 ];
 
 export default function Landing() {
   return (
     <PageTransition>
-      <div className={`${s.root} ${display.variable} ${body.variable} overflow-x-clip`}>
+      <div className={`${s.root} ${fontVars} overflow-x-clip`}>
         <LandingNav />
 
         {/* 1 · The promise beside the real product, lit on a violet stage */}
@@ -66,8 +63,8 @@ export default function Landing() {
           <div className={`${s.stage} ${s.grain} relative h-[400px] sm:h-[520px] lg:h-auto`}>
             <span className={`${s.haze} left-[30%] top-[18%] h-[260px] w-[420px]`} aria-hidden="true" />
             <span className={`${s.haze} bottom-[-60px] right-[-40px] h-[220px] w-[380px] opacity-70`} aria-hidden="true" />
-            {/* the market browser: cut off by the right edge only, with the stage showing beneath it */}
-            <div className={`${s.rim} absolute bottom-[18%] left-[10%] top-[11%] flex w-[150%] flex-col rounded-[16px] p-[6px] sm:w-[125%] lg:left-[12%] lg:w-[118%]`}>
+            {/* the market browser: runs off the stage's right and bottom edges */}
+            <div className={`${s.rim} absolute -bottom-6 left-[10%] top-[11%] flex w-[150%] flex-col rounded-[16px] p-[6px] sm:w-[125%] lg:left-[12%] lg:w-[118%]`}>
               <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-[11px] bg-white">
                 <div className="flex h-8 shrink-0 items-center gap-1.5 border-b border-[rgba(0,0,0,0.06)] px-3" aria-hidden="true">
                   <span className="h-2 w-2 rounded-full bg-[#c9c3ff]" />
@@ -99,10 +96,13 @@ export default function Landing() {
           <p className="mt-5 max-w-[56ch] text-[17px] leading-[1.55] text-[#2e2e3d] md:text-[18px]">
             Turn binary prediction markets into targeted strategies for your outlook, or add downside protection to an existing position.
           </p>
+          {/* Each point: a pale card with the piece of the product it's about, then its title and caption. */}
           <ul className="mt-10 grid auto-rows-fr gap-4 md:grid-cols-2 md:gap-6">
-            {POINTS.map(({ title, body: text, icon: Icon }) => (
+            {POINTS.map(({ title, body: text, Visual }) => (
               <li key={title} className="flex flex-col gap-3 rounded-[12px] bg-[#f8f9fc] p-7 md:p-9">
-                <Icon size={24} strokeWidth={1.6} className="text-[#010110]" aria-hidden="true" />
+                <div className="flex min-h-[190px] items-center justify-center" aria-hidden="true">
+                  <Visual />
+                </div>
                 <h3 className="mt-5 text-[20px] font-medium leading-7 tracking-[-0.02em] md:text-[22px]">{title}</h3>
                 <p className="max-w-[46ch] text-[15px] font-light leading-[1.6] text-[#2e2e3d] md:text-[16px]">{text}</p>
               </li>
