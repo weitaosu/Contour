@@ -222,7 +222,6 @@ export function PaperPositionScreen({ id }: { id: string }) {
                         cutLabels={d.ladder.cutLabels}
                         bucketLabels={d.ladder.bucketLabels}
                         cuts={d.ladder.cuts}
-                        now={nowMark}
                         height={240}
                       />
                     ) : (

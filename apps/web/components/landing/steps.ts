@@ -7,8 +7,8 @@
 export const STEPS = [
   {
     title: "Pick a market",
-    short: "crypto, sports, politics and more, below",
-    body: "Trade across crypto, sports, politics, and more on Gemini Prediction Markets.",
+    short: "crypto, sports, weather and more, below",
+    body: "Trade across crypto, sports, weather, and more on Gemini Prediction Markets.",
   },
   {
     title: "Shape your view",
