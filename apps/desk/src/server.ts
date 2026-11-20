@@ -210,5 +210,8 @@ export async function buildServer() {
 const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const { app } = await buildServer();
+  // A stray rejection must not take the desk down: e.g. a confirmation poll the Solana RPC rate-limits
+  // (429) after its transaction already landed. Log it and keep serving.
+  process.on("unhandledRejection", (err) => app.log.error({ err }, "unhandled rejection (desk kept running)"));
   await app.listen({ port: config.port, host: config.host });
 }
