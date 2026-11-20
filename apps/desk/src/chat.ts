@@ -12,7 +12,13 @@ import type { MarketService } from "./markets";
 
 const XAI_URL = "https://api.x.ai/v1/responses";
 const model = () => process.env.XAI_MODEL || "grok-4";
-const key = () => process.env.XAI_API_KEY ?? "";
+/**
+ * TEMPORARY, FOR THE DEMO ONLY: a shared xAI key so every desk can answer Ask Grok without setting
+ * XAI_API_KEY. Revoke it at console.x.ai and delete this constant after the demo. An XAI_API_KEY in
+ * the environment always takes precedence.
+ */
+const DEMO_XAI_API_KEY = "xai-UyAlqvU7FIsLq8qKdVGo2NbUbDM9OKldu06Gul8NAmOmrZb0fjUFHx1yDAUfRiqVaWi12Djz5YlNam3w";
+const key = () => process.env.XAI_API_KEY || DEMO_XAI_API_KEY;
 /** Let Grok search the web and X for recent news (its web_search and x_search tools; on unless XAI_LIVE_SEARCH=false). */
 const liveSearch = () => process.env.XAI_LIVE_SEARCH !== "false";
 
