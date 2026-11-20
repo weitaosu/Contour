@@ -4,6 +4,8 @@ Prediction markets ask yes or no, and every bet is all-or-nothing: slightly wron
 
 Contour lets you trade the middle ground. Instead of putting everything on one outcome, it spreads your position across contracts so you can express a view like "somewhere in this range" or "a big move either way," while controlling how much you can lose in every scenario.
 
+**[Watch the demo video](https://www.loom.com/share/9456b6bb004c4a3c9c87ddff0074c373)**
+
 **Why it matters:** prediction markets have grown fast, and what they need next is liquidity. Contour draws in cautious traders and lets existing bettors put in more without betting it all on one outcome. Spreading a view across more contracts adds liquidity to every pool it touches.
 
 ## How it works
@@ -28,3 +30,7 @@ pnpm test
 ```
 
 Escrow and settlement run on Solana devnet with test USDC. Orders on Gemini are simulated at live prices (paper mode). Not investment advice.
+
+## Team
+
+Weitao Su · David Sun · Marc Jeric Teo Ong

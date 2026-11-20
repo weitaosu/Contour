@@ -6,7 +6,7 @@ import { useAnchorWallet, useConnection, useWallet } from "@solana/wallet-adapte
 import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { escrowTerms, tradingFeeUsd } from "@contour/core";
 import { desk, type PaperPositionDetail, type StoredQuote } from "@/lib/desk";
-import { sendTx, useDeskConfig, useSolBalance } from "@/lib/chain";
+import { isRateLimited, sendTx, TxUnconfirmedError, useDeskConfig, useSolBalance } from "@/lib/chain";
 import { pct, short as shortAddr, usd } from "@/lib/format";
 import { Segmented } from "@/components/ui/Segmented";
 import { WalletDialog } from "@/components/WalletButton";
@@ -177,9 +177,26 @@ function BuyMore({ account, d, sol, onDone }: { account: string; d: PaperPositio
         // One SOL transfer to the desk's wallet; the desk checks it on-chain, then adds the quote.
         if (!publicKey || !anchorWallet || !fresh.stakeLamports) throw new Error("Connect your wallet to pay in SOL.");
         const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: new PublicKey(sol.payTo), lamports: BigInt(fresh.stakeLamports) }));
-        const signature = await sendTx(connection, anchorWallet, tx);
+        let signature: string;
+        try {
+          // A wallet that signs after the quote's window throws the signature away unsent (see ReviewDialog).
+          signature = await sendTx(connection, anchorWallet, tx, { notAfter: fresh.validUntil + 15_000 });
+        } catch (e) {
+          if (!(e instanceof TxUnconfirmedError)) throw e;
+          signature = e.signature; // sent; the desk checks on-chain whether it landed
+        }
         await qc.invalidateQueries({ queryKey: ["sol"] });
-        await desk.recordAddPayment({ signature, forecastHash: fresh.forecastHash, owner: publicKey.toBase58(), paperAccount: account, positionId: d.id });
+        // Recording is idempotent per signature: retry while the RPC is busy, stop at the desk's own verdict.
+        for (let attempt = 0; ; attempt++) {
+          try {
+            await desk.recordAddPayment({ signature, forecastHash: fresh.forecastHash, owner: publicKey.toBase58(), paperAccount: account, positionId: d.id });
+            break;
+          } catch (e) {
+            const m = (e as Error).message;
+            if (attempt >= 3 || /isn't a payment|failed on-chain|more than 60 seconds|No desk quote/i.test(m)) throw new Error(`Your payment was sent (${signature.slice(0, 8)}…) but couldn't be added yet: ${m}`);
+            await new Promise((r) => setTimeout(r, 2_500 * (attempt + 1)));
+          }
+        }
         await qc.invalidateQueries({ queryKey: ["paper", account] });
         onDone(`Bought more: ${contracts} contracts filled for ${usd(cost ?? 0)}, paid with ${solText(solCost ?? 0)} on Solana.`);
       } else {
@@ -189,7 +206,7 @@ function BuyMore({ account, d, sol, onDone }: { account: string; d: PaperPositio
       }
       setTick((x) => x + 1);
     } catch (e) {
-      setErr((e as Error).message);
+      setErr(isRateLimited(e) ? "Solana devnet's public node is busy (rate-limited). Nothing was sent; wait a few seconds and try again." : (e as Error).message);
       setTick((x) => x + 1); // re-quote at the new prices
     } finally {
       setBusy(false);

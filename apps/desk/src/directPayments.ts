@@ -27,12 +27,20 @@ function ready(ctx: HandlerCtx): Connection {
 /** Check a payment on-chain against its quote: exactly the quoted amount, from `owner` to the receiving wallet, within a minute of the quote. Returns when it landed (ms). */
 async function confirmPayment(ctx: HandlerCtx, signature: string, owner: string, quote: StoredQuote & { createdAt: number }): Promise<number> {
   const connection = ready(ctx);
-  // The transfer must be confirmed: retry briefly while it lands.
+  // The transfer must be confirmed: retry while it lands (~30 s), and ride out the public devnet node's
+  // rate limits, which share this machine's budget with the browser. A busy node is never an answer.
   let tx = null;
-  for (let i = 0; i < 10 && !tx; i++) {
-    tx = await connection.getParsedTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-    if (!tx) await new Promise((r) => setTimeout(r, 800));
+  let busy: Error | null = null;
+  for (let i = 0; i < 16 && !tx; i++) {
+    try {
+      tx = await connection.getParsedTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+      busy = null;
+    } catch (err) {
+      busy = err as Error;
+    }
+    if (!tx) await new Promise((r) => setTimeout(r, Math.min(800 * 1.35 ** i, 4_000)));
   }
+  if (!tx && busy) throw fail(`Solana devnet couldn't be read just now (${busy.message.slice(0, 120)}). The payment is safe; try saving again.`, 503);
   if (!tx) throw fail("The payment transaction wasn't found on-chain.", 404);
   if (tx.meta?.err) throw fail("The payment transaction failed on-chain.");
   // Older quotes were paid in test USDC to the receiving wallet's token account.

@@ -9,7 +9,7 @@ import { Dialog } from "radix-ui";
 import { Check, X } from "lucide-react";
 import { escrowTerms, type Ladder, type Quote } from "@contour/core";
 import { desk, type StoredQuote } from "@/lib/desk";
-import { openPositionIx, sendTx, useChainConfig, useDeskConfig, useProgram, useSolBalance, useUsdcBalance, useUsdcMint } from "@/lib/chain";
+import { isRateLimited, openPositionIx, QuoteExpiredError, sendTx, TxUnconfirmedError, useChainConfig, useDeskConfig, useProgram, useSolBalance, useUsdcBalance, useUsdcMint } from "@/lib/chain";
 import { notableUnused, pct, settleLabel, short, usd } from "@/lib/format";
 import { explorerTx } from "@/lib/env";
 import { usePaperAccount } from "@/lib/paper";
@@ -27,6 +27,13 @@ const solOf = (q: StoredQuote | null) => (q?.stakeLamports ? Number(q.stakeLampo
 const SOL_FAUCET = "https://faucet.solana.com";
 /** Headroom for the network fee on top of the stake. */
 const FEE_SOL = 0.00001;
+/**
+ * The desk accepts a payment only if it lands within 60 s of its quote (`validUntil` is the quote's time
+ * + 30 s). A wallet that comes back later than this throws its signature away unsent, which leaves 15 s
+ * for the transfer to land: a payment the desk would refuse never leaves the wallet.
+ */
+const signBy = (q: StoredQuote) => q.validUntil + 15_000;
+const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
  * The last screen before signing: the position in plain words, what happens on confirm, and an
@@ -257,6 +264,8 @@ function Step({ n, children }: { n: number; children: React.ReactNode }) {
 /** What went wrong with a payment, in words a newcomer can act on (the raw message stays for anything else). */
 function paymentError(e: Error): string {
   const m = e.message ?? "";
+  if (e instanceof QuoteExpiredError || e instanceof TxUnconfirmedError) return m;
+  if (isRateLimited(e)) return "Solana devnet's public node is busy (rate-limited). Nothing was sent; wait a few seconds and confirm again.";
   if (/reject|declin|denied|cancel/i.test(m)) return "You declined to sign, so nothing was sent and no money moved. Confirm again when you're ready.";
   if (/insufficient (funds|lamports)|no record of a prior credit|debit an account/i.test(m))
     return `Your wallet doesn't have enough devnet SOL. Get some free at ${SOL_FAUCET}, then confirm.`;
@@ -325,23 +334,38 @@ function ConfirmBlock({
     if (!publicKey || !anchorWallet || !server?.stakeLamports || !payTo) return;
     setErr(null);
     try {
-      setBusy("Waiting for your signature…");
+      setBusy("Waiting for your signature in your wallet…");
       const lamports = BigInt(server.stakeLamports);
       const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: new PublicKey(payTo), lamports }));
-      setBusy(`Sending ${sol(Number(lamports) / 1e9)}…`);
-      const sig = await sendTx(connection, anchorWallet, tx);
-      await qc.invalidateQueries({ queryKey: ["sol"] });
-      // Save it as a position (the desk checks the transfer on-chain), then open its page.
-      setBusy("Saving your position…");
+      let sig: string;
       try {
-        const r = await desk.recordPayment({ signature: sig, forecastHash: server.forecastHash, owner: publicKey.toBase58(), paperAccount: paperAccount ?? undefined });
-        await qc.invalidateQueries({ queryKey: ["paper"] });
-        // Open it in the portfolio, where it can be bought into and sold; the payment-only page if that failed.
-        router.push(r.paperPosition ? `/portfolio/${r.paperPosition}?opened=1` : `/p/${r.position}`);
+        sig = await sendTx(connection, anchorWallet, tx, { notAfter: signBy(server) });
       } catch (e) {
-        setPaid({ sig, amount: Number(lamports) / 1e9, to: payTo, problem: (e as Error).message });
-        setBusy(null);
+        // Sent but not yet confirmed: it may well have landed, and the desk checks on-chain, so try to record it.
+        if (!(e instanceof TxUnconfirmedError)) throw e;
+        sig = e.signature;
       }
+      await qc.invalidateQueries({ queryKey: ["sol"] });
+      // Save it as a position (the desk checks the transfer on-chain), then open its page. Recording is
+      // idempotent per signature, so a busy RPC or a dropped request is simply tried again.
+      setBusy("Payment sent. Saving your position…");
+      let problem = "";
+      for (let attempt = 0; attempt < 4; attempt++) {
+        try {
+          const r = await desk.recordPayment({ signature: sig, forecastHash: server.forecastHash, owner: publicKey.toBase58(), paperAccount: paperAccount ?? undefined });
+          await qc.invalidateQueries({ queryKey: ["paper"] });
+          // Open it in the portfolio, where it can be bought into and sold; the payment-only page if that failed.
+          router.push(r.paperPosition ? `/portfolio/${r.paperPosition}?opened=1` : `/p/${r.position}`);
+          return;
+        } catch (e) {
+          problem = (e as Error).message;
+          // The desk's answer is final when it has looked at the transaction and turned it down.
+          if (/isn't a payment|failed on-chain|more than 60 seconds|No desk quote/i.test(problem)) break;
+          await sleep(2_500 * (attempt + 1));
+        }
+      }
+      setPaid({ sig, amount: Number(lamports) / 1e9, to: payTo, problem });
+      setBusy(null);
     } catch (e) {
       setErr(paymentError(e as Error));
       setBusy(null);
@@ -365,7 +389,7 @@ function ConfirmBlock({
         expiryTs: server.expiryTs,
       });
       setBusy("Locking your payout schedule on Solana…");
-      await sendTx(connection, anchorWallet, new Transaction().add(ix));
+      await sendTx(connection, anchorWallet, new Transaction().add(ix), { notAfter: signBy(server) });
       router.push(`/p/${position.toBase58()}`);
     } catch (e) {
       setErr(paymentError(e as Error));
@@ -386,8 +410,13 @@ function ConfirmBlock({
     label = "Desk is not connected to the chain";
     disabled = true;
   } else if (lacking && payTo) {
-    label = "Get devnet SOL";
-    action = () => window.open(SOL_FAUCET, "_blank", "noopener,noreferrer");
+    label = solPay !== null ? `Not enough devnet SOL · need ${sol(solPay)}` : "Get devnet SOL";
+    // The balance may be stale: read it again, and pay if it's enough after all; the faucet only if it isn't.
+    action = async () => {
+      const fresh = await bal.refetch();
+      if (fresh.data !== undefined && solPay !== null && fresh.data >= solPay + FEE_SOL) return payDirect();
+      window.open(SOL_FAUCET, "_blank", "noopener,noreferrer");
+    };
   } else if (lacking) {
     label = "Get test USDC";
     action = cfg.data?.faucetEnabled ? faucet : null;
