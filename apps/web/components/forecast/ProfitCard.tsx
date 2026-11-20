@@ -140,6 +140,7 @@ export const ProfitSummary = memo(function ProfitSummary({
                 likelyBracket={false}
                 live={live}
                 cuts={ladder.cuts}
+                now={now}
                 height={h}
               />
             )}

@@ -707,8 +707,11 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
           you scroll. Phones: the panels stack in step order; the bottom bar keeps Review one tap away. */}
       {/* On screens with height to spare, the workspace fills the window and the two main panels take the extra. */}
       {/* Two rows on wide screens: the workspace takes the screen's spare height, the results dropdown sits under it. */}
-      <div className={`grid flex-1 grid-cols-1 items-start gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(320px,348px)] ${protecting ? "" : "lg:grid-rows-[1fr_auto]"}`}>
-        <div className="flex min-w-0 flex-col gap-2 max-lg:contents lg:self-stretch">
+      {/* Wide screens: the outlook and the two charts take a fixed share of the screen (all of it but the
+          closed "Why Contour" bar under them), so opening that dropdown lengthens the page instead of
+          squeezing the charts. The order ticket spans both rows. */}
+      <div className={`grid flex-1 grid-cols-1 items-start gap-2 lg:grid-cols-[minmax(0,1fr)_minmax(320px,348px)] ${protecting ? "" : "lg:grid-rows-[auto_auto]"}`}>
+        <div className={`flex min-w-0 flex-col gap-2 max-lg:contents ${protecting ? "lg:self-stretch" : "lg:h-[calc(100dvh-149px-85px)] lg:min-h-[560px]"}`}>
           {ordered && (
             <div id="outlook" className="min-w-0 scroll-mt-24 max-lg:order-1">
               <OutlookPicker
@@ -901,18 +904,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
           </div>
 
 
-          {/* Under the charts: profit or loss at settlement against one contract (its takeaway as the
-              subtitle, the dots a tap away). The contracts you'd buy sit in the order ticket.
-              Protection has no comparison: its notes take the row and its own table follows. */}
-          {!protecting && (
-            <ReturnOdds
-              ladder={ladder}
-              quote={comparing ? display : { ...display, comparison: null }}
-              sizedDown={comparing ? oneBet : null}
-              faded={!!summaryStatus}
-              className="max-lg:order-7"
-            />
-          )}
+          {/* Protection has no comparison: its notes and its own table follow the charts. */}
           {protecting && protectQuote && (
             <Panel id="notes" title="Good to know" className="max-lg:order-8">
               <ProtectNotes ladder={ladder} quote={display} protection={protectQuote.protection} name={name} />
@@ -920,6 +912,18 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
           )}
           {scenarioPanel}
         </div>
+
+        {/* "Why Contour", its own row under the charts: closed, a bar with the takeaway; open, profit or
+            loss at settlement against one contract and the out-of-100 dots. */}
+        {!protecting && (
+          <ReturnOdds
+            ladder={ladder}
+            quote={comparing ? display : { ...display, comparison: null }}
+            sizedDown={comparing ? oneBet : null}
+            faded={!!summaryStatus}
+            className="max-lg:order-7 lg:col-start-1 lg:row-start-2"
+          />
+        )}
 
         {/* Wide screens: the ticket is as tall as the screen below the market bar (on load it ends at
             the screen's bottom), with its contracts and Review anchored to the bottom. */}
@@ -930,7 +934,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
         <aside
           id="controls"
           aria-labelledby="controls-title"
-          className="flex min-w-0 scroll-mt-24 flex-col rounded-[24px] bg-cloud max-lg:order-5 lg:sticky lg:top-[81px] lg:h-[calc(100dvh-149px)] lg:self-start lg:overflow-y-auto"
+          className={`flex min-w-0 scroll-mt-24 flex-col rounded-[24px] bg-cloud max-lg:order-5 lg:sticky lg:top-[81px] lg:h-[calc(100dvh-149px-64px)] lg:self-start lg:overflow-y-auto ${protecting ? "" : "lg:col-start-2 lg:row-span-2 lg:row-start-1"}`}
         >
           <div className="px-4 pt-4 xl:px-5 xl:pt-5">
             <h2 id="controls-title" className="flex items-center gap-2 text-[16px] font-bold leading-tight text-inkstone">

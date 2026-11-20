@@ -65,6 +65,33 @@ export function useUsdcBalance(owner: PublicKey | null | undefined, mint: Public
   });
 }
 
+/** SOL in dollars (Gemini's SOL/USD, via the desk), refreshed every 30 s: what devnet SOL balances are valued at. */
+export function useSolPrice() {
+  return useQuery({
+    queryKey: ["sol-price"],
+    queryFn: () => fetch(`${env.deskUrl}/prices/sol`).then((r) => (r.ok ? (r.json() as Promise<{ usd: number; at: number }>) : Promise.reject(new Error(`${r.status}`)))),
+    refetchInterval: 30_000,
+    staleTime: 15_000,
+  });
+}
+
+/** The wallet's SOL balance, in SOL. */
+export function useSolBalance(owner: PublicKey | null | undefined) {
+  const { connection } = useConnection();
+  return useQuery({
+    queryKey: ["sol", owner?.toBase58()],
+    enabled: !!owner,
+    queryFn: async () => {
+      try {
+        return (await connection.getBalance(owner!, "confirmed")) / 1e9;
+      } catch {
+        return 0;
+      }
+    },
+    refetchInterval: 10_000,
+  });
+}
+
 export function useProgram() {
   const { connection } = useConnection();
   const wallet = useAnchorWallet();

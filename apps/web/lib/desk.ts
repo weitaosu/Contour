@@ -55,6 +55,9 @@ export interface StoredQuote {
   stakeBaseUnits: string;
   /** The quote's cash, which stays in the wallet (absent on quotes from before it stopped being escrowed). */
   keptBaseUnits?: string;
+  /** Direct-payment mode: the stake in devnet lamports, at `solUsd` dollars per SOL when quoted. */
+  stakeLamports?: string;
+  solUsd?: number;
   expiryTs: number;
   validUntil: number;
   capturedAt: string;
@@ -190,8 +193,26 @@ export interface PaperPositionDetail extends PaperPositionSummary {
   history: PaperMark[];
   trades: PaperTrade[];
   accountCashUsd: number;
+  /** Its Solana transfers, oldest first: empty for a practice-cash position. */
+  payments: SolanaTransfer[];
   canBuyMore: boolean;
   canSell: boolean;
+}
+
+/**
+ * One devnet SOL transfer behind a portfolio position: the buyer paying the desk's wallet to open it
+ * ("open") or buy more ("add"), or the desk's wallet paying the buyer a sale's proceeds ("sell").
+ */
+export interface SolanaTransfer {
+  kind: "open" | "add" | "sell";
+  signature: string;
+  from: string;
+  to: string;
+  lamports: string;
+  solUsd: number | null;
+  usd: number;
+  at: number;
+  cluster: "devnet";
 }
 
 export interface DeskConfig {
@@ -237,8 +258,12 @@ export const desk = {
     fetch(`${env.deskUrl}/paper/${account}/positions/${id}/add`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ quoteId }) }).then((r) => j<PaperPositionDetail>(r)),
   paperSell: (account: string, id: string, body: { fraction: number; minProceedsUsd?: number }) =>
     fetch(`${env.deskUrl}/paper/${account}/positions/${id}/sell`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) =>
-      j<{ sale: { proceedsUsd: number; realizedUsd: number }; position: PaperPositionDetail }>(r),
+      // Positions paid for on Solana are paid out in SOL: `payout` is that transfer (or `payoutError`).
+      j<{ sale: { proceedsUsd: number; realizedUsd: number }; position: PaperPositionDetail; payout?: SolanaTransfer | null; payoutError?: string }>(r),
     ),
+  /** Buy more of a position paid for on Solana: report the payment just sent; the desk checks it and adds. */
+  recordAddPayment: (body: { signature: string; forecastHash: string; owner: string; paperAccount: string; positionId: string }) =>
+    fetch(`${env.deskUrl}/payments/add`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) => j<PaperPositionDetail>(r)),
   quote: (
     body: {
       ticker: string;
@@ -265,9 +290,9 @@ export const desk = {
       j<{ signature: string; sol: number; usdc: number }>(r),
     ),
   /** Direct-payment mode: save a payment just sent to the desk's pay-to wallet as a position. */
-  recordPayment: (body: { signature: string; forecastHash: string; owner: string }) =>
+  recordPayment: (body: { signature: string; forecastHash: string; owner: string; paperAccount?: string }) =>
     fetch(`${env.deskUrl}/payments`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }).then((r) =>
-      j<{ position: string }>(r),
+      j<{ position: string; paperPosition: string | null; paperError?: string }>(r),
     ),
   streamUrl: (pubkey: string) => `${env.deskUrl}/positions/${pubkey}/stream`,
 };

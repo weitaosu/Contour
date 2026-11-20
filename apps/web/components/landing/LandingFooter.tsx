@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { LogoMark } from "@/components/Logo";
+import { Logo } from "@/components/Logo";
 import { env } from "@/lib/env";
 import { s } from "./styles";
 
@@ -48,9 +48,8 @@ export function LandingFooter() {
           </div>
         ))}
         <div className="md:justify-self-end md:text-right">
-          <div className="flex items-center gap-2.5 md:justify-end">
-            <LogoMark size={28} />
-            <span className={`${s.display} text-[22px] tracking-[-0.02em]`}>Contour</span>
+          <div className="flex items-center md:justify-end">
+            <Logo />
           </div>
           <p className="mt-4 text-[13px] text-[#70707d]">Built for UBC 2026. Not investment advice; not insurance.</p>
         </div>

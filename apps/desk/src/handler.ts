@@ -1,8 +1,6 @@
 import { compile, scoreBps, normalizeEvent, outcomeBucket, GEMINI_TAKER_FEE_RATE, tradingFeeUsd } from "@contour/core";
 import { decodeEvents } from "@contour/chain";
-import { PublicKey, type ParsedInstruction } from "@solana/web3.js";
-import { ata } from "@contour/chain";
-import { createHash } from "node:crypto";
+import { PublicKey } from "@solana/web3.js";
 import { config } from "./config";
 import type { DB } from "./db";
 import type { Executor } from "./executor";
@@ -198,7 +196,7 @@ async function onOpened(ctx: HandlerCtx, position: string, d: Record<string, unk
 }
 
 /** Place each of the quote's legs through the executor and record the fills (paper by default). */
-async function hedgeLegs(ctx: HandlerCtx, position: string, quote: StoredQuote, sig: string) {
+export async function hedgeLegs(ctx: HandlerCtx, position: string, quote: StoredQuote, sig: string) {
   const legs = quote.quote.legs;
   const feeRate = quote.quote.feeRate ?? GEMINI_TAKER_FEE_RATE;
   const insFill = ctx.db.prepare(
@@ -218,68 +216,14 @@ async function hedgeLegs(ctx: HandlerCtx, position: string, quote: StoredQuote, 
   ctx.hub.publish(position, "hedged", { position, fills: legs.length, mode: ctx.executor.mode, openedSig: sig });
 }
 
-/**
- * Direct-payment mode: the buyer sent USDC straight to `config.payTo` instead of opening an escrow.
- * Check that transfer on-chain against the quote, then record it as a position (Active, with the
- * quote's schedule) and hedge it like an escrowed one, so it shows on the Record and position pages.
- * The position id is derived from the payment signature, so recording the same payment twice is a no-op.
- */
-export async function recordDirectPayment(ctx: HandlerCtx, a: { signature: string; forecastHash: string; owner: string }): Promise<string> {
-  const fail = (msg: string, statusCode = 400) => Object.assign(new Error(msg), { statusCode });
-  if (!config.payTo) throw fail("Direct payments are not enabled on this desk.", 404);
-  if (!ctx.chain) throw fail("Desk chain access is not configured.", 503);
-  const quote = loadQuoteByHash(ctx.db, a.forecastHash);
-  if (!quote) throw fail("No desk quote matches this payment.", 404);
-  const position = new PublicKey(createHash("sha256").update(a.signature).digest()).toBase58();
-  if (ctx.db.prepare("SELECT 1 FROM positions WHERE pubkey = ?").get(position)) return position;
-
-  // The transfer must be confirmed: retry briefly while it lands.
-  let tx = null;
-  for (let i = 0; i < 10 && !tx; i++) {
-    tx = await ctx.chain.connection.getParsedTransaction(a.signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
-    if (!tx) await new Promise((r) => setTimeout(r, 800));
-  }
-  if (!tx) throw fail("The payment transaction wasn't found on-chain.", 404);
-  if (tx.meta?.err) throw fail("The payment transaction failed on-chain.");
-  const mint = ctx.chain.usdcMint.toBase58();
-  const dest = ata(ctx.chain.usdcMint, new PublicKey(config.payTo)).toBase58();
-  const paid = tx.transaction.message.instructions.some((ix) => {
-    const p = (ix as ParsedInstruction).parsed as { type?: string; info?: Record<string, unknown> } | undefined;
-    const info = p?.info;
-    const amount = (info?.tokenAmount as { amount?: string } | undefined)?.amount;
-    return p?.type === "transferChecked" && info?.mint === mint && info?.destination === dest && info?.authority === a.owner && amount === quote.stakeBaseUnits;
-  });
-  if (!paid) throw fail("That transaction isn't a payment of this quote's amount to Contour's account.");
-
-  const opened = (tx.blockTime ?? Math.floor(Date.now() / 1000)) * 1000;
-  if (opened - quote.createdAt > config.acceptMaxQuoteAgeMs) throw fail("The quote was more than 60 seconds old when it was paid.");
-  const schedule = quote.scheduleBaseUnits;
-  setPosition(ctx.db, position, {
-    owner: a.owner,
-    state: "Active",
-    ticker: quote.ticker,
-    quote_id: quote.quoteId,
-    forecast_hash: a.forecastHash,
-    stake_base: quote.stakeBaseUnits,
-    max_payout_base: String(Math.max(...schedule.map(Number))),
-    schedule_json: JSON.stringify(schedule),
-    expiry_ts: quote.expiryTs,
-    opened_sig: a.signature,
-    accepted_sig: a.signature,
-    pay_to: config.payTo,
-  });
-  ctx.hub.publish(position, "opened", { position, signature: a.signature });
-  ctx.hub.publish(position, "accepted", { position, signature: a.signature });
-  await hedgeLegs(ctx, position, quote, a.signature);
-  return position;
-}
 
 /** Settle Active positions past expiry once Gemini reports the event settled; unwind after grace. */
 export async function runScheduler(ctx: HandlerCtx, graceSecs: number) {
   if (!ctx.chain) return;
   const nowS = Math.floor(Date.now() / 1000);
   const due = ctx.db
-    .prepare("SELECT pubkey, owner, ticker, quote_id, expiry_ts FROM positions WHERE state = 'Active' AND expiry_ts <= ?")
+    // Direct payments have no escrow on-chain to settle or unwind.
+    .prepare("SELECT pubkey, owner, ticker, quote_id, expiry_ts FROM positions WHERE state = 'Active' AND expiry_ts <= ? AND pay_to IS NULL")
     .all(nowS) as { pubkey: string; owner: string; ticker: string | null; quote_id: string | null; expiry_ts: number }[];
   for (const p of due) {
     if (!p.ticker || !p.quote_id) continue;

@@ -4,22 +4,27 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useQueryClient } from "@tanstack/react-query";
 import { useAnchorWallet, useConnection, useWallet } from "@solana/wallet-adapter-react";
-import { PublicKey, Transaction } from "@solana/web3.js";
-import { createAssociatedTokenAccountIdempotentInstruction, createTransferCheckedInstruction } from "@solana/spl-token";
-import { ata } from "@contour/chain";
+import { PublicKey, SystemProgram, Transaction } from "@solana/web3.js";
 import { Dialog } from "radix-ui";
 import { Check, X } from "lucide-react";
 import { escrowTerms, type Ladder, type Quote } from "@contour/core";
 import { desk, type StoredQuote } from "@/lib/desk";
-import { openPositionIx, sendTx, useChainConfig, useDeskConfig, useProgram, useUsdcBalance, useUsdcMint } from "@/lib/chain";
+import { openPositionIx, sendTx, useChainConfig, useDeskConfig, useProgram, useSolBalance, useUsdcBalance, useUsdcMint } from "@/lib/chain";
 import { notableUnused, pct, settleLabel, short, usd } from "@/lib/format";
 import { explorerTx } from "@/lib/env";
+import { usePaperAccount } from "@/lib/paper";
 import { isWin, runs, whenPhrase } from "@/lib/outcomes";
 import { WalletDialog } from "@/components/WalletButton";
 import { FOCUS_PANEL } from "@/components/forecast/Panel";
 import { Tile } from "@/components/forecast/ProfitCard";
 
 const dollars = (n: number) => usd(n, Math.abs(n) >= 100 ? 0 : 2);
+const sol = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL`;
+/** The quote's stake in devnet SOL (direct-payment mode), or null before the desk quotes it. */
+const solOf = (q: StoredQuote | null) => (q?.stakeLamports ? Number(q.stakeLamports) / 1e9 : null);
+const SOL_FAUCET = "https://faucet.solana.com";
+/** Headroom for the network fee on top of the stake. */
+const FEE_SOL = 0.00001;
 
 /**
  * The last screen before signing: the position in plain words, what happens on confirm, and an
@@ -67,6 +72,7 @@ export function ReviewDialog({
   const kept = (server ? Number(server.keptBaseUnits ?? 0) : escrowTerms(quote).keptBase) / 1e6;
   const pay = server ? Number(server.stakeBaseUnits) / 1e6 : stake - kept;
   const keeps = notableUnused(kept);
+  const solPay = solOf(server);
 
   return (
     <Dialog.Root
@@ -106,7 +112,7 @@ export function ReviewDialog({
 
             {/* The numbers that matter, as tiles */}
             <div className="mt-2 grid grid-cols-2 gap-1.5 rounded-[20px] bg-cloud p-1.5">
-              <Tile compact label="You pay" value={usd(pay)} sub={keeps ? `of your ${usd(stake)}` : "test USDC"} />
+              <Tile compact label="You pay" value={usd(pay)} sub={payTo ? (solPay !== null ? `≈ ${sol(solPay)} on devnet` : "in devnet SOL") : keeps ? `of your ${usd(stake)}` : "test USDC"} />
               {protection ? (
                 <>
                   <Tile compact label="Pays out" value={protection.floor ? `up to ${usd(quote.maxPayout)}` : usd(protection.backInMiddle ?? quote.maxPayout)} sub={protection.floor ? `if it ends below ${protection.floor}` : `if it stays below ${protection.cap}`} />
@@ -172,10 +178,17 @@ export function ReviewDialog({
               {payTo ? (
                 <ol className="mt-2.5 flex flex-col gap-2.5 text-[14px] text-inkstone">
                   <Step n={1}>
-                    Your wallet signs one transaction that sends <b className="tnum">{usd(pay)}</b> test USDC straight to Contour&apos;s account{" "}
-                    <span className="tnum font-bold">{short(payTo, 4)}</span>.{keeps && <> The other {usd(kept)} isn&apos;t used.</>}
+                    Your wallet signs one transaction that sends <b className="tnum">{solPay !== null ? sol(solPay) : "the SOL"}</b> on devnet straight to Contour&apos;s account{" "}
+                    <span className="tnum font-bold">{short(payTo, 4)}</span>
+                    {server?.solUsd ? (
+                      <>
+                        {" "}
+                        ({usd(pay)} at an estimated {usd(server.solUsd)} per SOL)
+                      </>
+                    ) : null}
+                    .{keeps && <> The other {usd(kept)} isn&apos;t used.</>}
                   </Step>
-                  <Step n={2}>The position shows up in your portfolio right away, valued live, with the transaction to follow on the Solana Explorer.</Step>
+                  <Step n={2}>The position opens in your wallet right away, valued live, where you can buy more or sell. The payment is linked on it.</Step>
                 </ol>
               ) : (
                 <ol className="mt-2.5 flex flex-col gap-2.5 text-[14px] text-inkstone">
@@ -232,7 +245,7 @@ function paymentError(e: Error): string {
   const m = e.message ?? "";
   if (/reject|declin|denied|cancel/i.test(m)) return "You declined to sign, so nothing was sent and no money moved. Confirm again when you're ready.";
   if (/insufficient (funds|lamports)|no record of a prior credit|debit an account/i.test(m))
-    return "Your wallet needs a little SOL for the network fee. Get test USDC again (it includes some SOL), then confirm.";
+    return `Your wallet doesn't have enough devnet SOL. Get some free at ${SOL_FAUCET}, then confirm.`;
   if (/blockhash|expired|timed? ?out/i.test(m)) return "The network took too long to confirm, so the transaction lapsed. Nothing moved; confirm again.";
   if (/user ?limit|daily|cap/i.test(m)) return "That's over your per-position or daily limit. Try a smaller amount.";
   return `The payment didn't go through: ${m.slice(0, 200)}`;
@@ -263,16 +276,21 @@ function ConfirmBlock({
   const mint = useUsdcMint();
   const cfg = useDeskConfig();
   const chainCfg = useChainConfig();
-  const bal = useUsdcBalance(publicKey, mint);
+  const usdcBal = useUsdcBalance(publicKey, payTo ? null : mint);
+  const solBal = useSolBalance(publicKey);
+  // Direct payment charges devnet SOL; the escrow flow charges USDC.
+  const bal = payTo ? solBal : usdcBal;
+  const solPay = solOf(server);
+  const paperAccount = usePaperAccount();
   const [dialog, setDialog] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // Set only if the payment went through but couldn't be saved as a position (shown instead of the button).
   const [paid, setPaid] = useState<{ sig: string; amount: number; to: string; problem: string } | null>(null);
 
-  // Direct payment needs only the USDC mint; the escrow flow also needs the program deployed.
-  const deployed = payTo ? !!mint : !!chainCfg.data && !!mint;
-  const lacking = bal.data !== undefined && bal.data < stake;
+  // Direct payment is a plain SOL transfer; the escrow flow needs the program and the USDC mint.
+  const deployed = payTo ? true : !!chainCfg.data && !!mint;
+  const lacking = bal.data !== undefined && (payTo ? solPay !== null && bal.data < solPay + FEE_SOL : bal.data < stake);
 
   async function faucet() {
     if (!publicKey) return;
@@ -288,32 +306,26 @@ function ConfirmBlock({
     }
   }
 
-  /** Demo direct payment: one USDC transfer from the buyer straight to `payTo`. */
+  /** Demo direct payment: one devnet SOL transfer from the buyer straight to `payTo`, at the quote's SOL price. */
   async function payDirect() {
-    if (!publicKey || !anchorWallet || !mint || !server || !payTo) return;
+    if (!publicKey || !anchorWallet || !server?.stakeLamports || !payTo) return;
     setErr(null);
     try {
       setBusy("Waiting for your signature…");
-      const to = new PublicKey(payTo);
-      const from = ata(mint, publicKey);
-      const dest = ata(mint, to);
-      const amount = BigInt(server.stakeBaseUnits);
-      const tx = new Transaction().add(
-        // Creates the receiving USDC account the first time (paid by the buyer); a no-op after that.
-        createAssociatedTokenAccountIdempotentInstruction(publicKey, dest, to, mint),
-        createTransferCheckedInstruction(from, mint, dest, publicKey, amount, 6),
-      );
-      setBusy(`Sending ${usd(Number(amount) / 1e6)} USDC…`);
+      const lamports = BigInt(server.stakeLamports);
+      const tx = new Transaction().add(SystemProgram.transfer({ fromPubkey: publicKey, toPubkey: new PublicKey(payTo), lamports }));
+      setBusy(`Sending ${sol(Number(lamports) / 1e9)}…`);
       const sig = await sendTx(connection, anchorWallet, tx);
-      await qc.invalidateQueries({ queryKey: ["usdc"] });
+      await qc.invalidateQueries({ queryKey: ["sol"] });
       // Save it as a position (the desk checks the transfer on-chain), then open its page.
       setBusy("Saving your position…");
       try {
-        const { position } = await desk.recordPayment({ signature: sig, forecastHash: server.forecastHash, owner: publicKey.toBase58() });
-        await qc.invalidateQueries({ queryKey: ["wallet-portfolio"] });
-        router.push(`/p/${position}`);
+        const r = await desk.recordPayment({ signature: sig, forecastHash: server.forecastHash, owner: publicKey.toBase58(), paperAccount: paperAccount ?? undefined });
+        await qc.invalidateQueries({ queryKey: ["paper"] });
+        // Open it in the portfolio, where it can be bought into and sold; the payment-only page if that failed.
+        router.push(r.paperPosition ? `/portfolio/${r.paperPosition}?opened=1` : `/p/${r.position}`);
       } catch (e) {
-        setPaid({ sig, amount: Number(amount) / 1e6, to: payTo, problem: (e as Error).message });
+        setPaid({ sig, amount: Number(lamports) / 1e9, to: payTo, problem: (e as Error).message });
         setBusy(null);
       }
     } catch (e) {
@@ -347,7 +359,7 @@ function ConfirmBlock({
     }
   }
 
-  let label = payTo ? `Confirm and pay · ${usd(stake)}` : `Confirm and sign · ${usd(stake)}`;
+  let label = payTo ? `Confirm and pay · ${solPay !== null ? sol(solPay) : usd(stake)}` : `Confirm and sign · ${usd(stake)}`;
   let action: (() => void) | null = payTo ? payDirect : confirm;
   let disabled = false;
   if (!publicKey) {
@@ -359,11 +371,14 @@ function ConfirmBlock({
   } else if (!payTo && cfg.data && !cfg.data.desk) {
     label = "Desk is not connected to the chain";
     disabled = true;
+  } else if (lacking && payTo) {
+    label = "Get devnet SOL";
+    action = () => window.open(SOL_FAUCET, "_blank", "noopener,noreferrer");
   } else if (lacking) {
     label = "Get test USDC";
     action = cfg.data?.faucetEnabled ? faucet : null;
     disabled = !cfg.data?.faucetEnabled;
-  } else if (!server) {
+  } else if (!server || (payTo && solPay === null)) {
     label = "Waiting for desk quote…";
     disabled = true;
   }
@@ -376,7 +391,7 @@ function ConfirmBlock({
     return (
       <div className="mt-5 flex flex-col gap-2 rounded-[20px] bg-cloud px-5 py-4 text-[15px] text-inkstone" role="status">
         <p className="flex items-center gap-2 font-bold">
-          <Check size={18} strokeWidth={3} className="text-gain" aria-hidden="true" /> Paid {usd(paid.amount)} USDC to {short(paid.to, 4)}
+          <Check size={18} strokeWidth={3} className="text-gain" aria-hidden="true" /> Paid {sol(paid.amount)} to {short(paid.to, 4)}
         </p>
         <p className="text-[14px] text-slate">The transfer is confirmed on Solana, but the desk couldn&apos;t save it as a position: {paid.problem}</p>
         <a className="link text-[14px] font-bold" href={explorerTx(paid.sig)} target="_blank" rel="noreferrer">
@@ -396,7 +411,8 @@ function ConfirmBlock({
           : server
             ? `Desk quote · ${age}s ago${payTo ? "" : " · prices lock when you sign"}`
             : "Preview computed in your browser; desk quote pending."}
-        {publicKey && bal.data !== undefined ? ` · Balance ${usd(bal.data)}` : ""}
+        {publicKey && bal.data !== undefined ? ` · Balance ${payTo ? sol(bal.data) : usd(bal.data)}` : ""}
+        {payTo && server?.solUsd ? ` · SOL ≈ ${usd(server.solUsd)} (estimate)` : ""}
         {` · Expires ${settleLabel(ladder.expiry)}`}
       </p>
       {err && <p className="text-[14px] text-inkstone">{err}</p>}

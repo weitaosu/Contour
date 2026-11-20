@@ -1,13 +1,16 @@
 "use client";
 
 import { PageTransition } from "@/components/PageTransition";
-import { PortfolioScreen } from "@/components/portfolio/PortfolioScreen";
+import { DemoPortfolioScreen } from "@/components/portfolio/DemoPortfolioScreen";
 
-/** The Portfolio tab: every position the connected wallet has paid for, open ones valued live. */
+/**
+ * The Portfolio tab, "Your wallet": every position, valued live and tradable (buy more, sell). Ones paid
+ * for on Solana carry their transaction; the demo history and positions tagged Demo are sample data.
+ */
 export default function PortfolioPage() {
   return (
     <PageTransition>
-      <PortfolioScreen />
+      <DemoPortfolioScreen />
     </PageTransition>
   );
 }

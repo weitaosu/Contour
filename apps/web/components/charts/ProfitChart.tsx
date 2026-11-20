@@ -30,12 +30,29 @@ export interface ProfitChartProps {
   /** A settled outcome to ring and label (position page). */
   outcome?: number | null;
   outcomeLabel?: string;
-  /** The ladder's cut values (ordered ladders). */
+  /** The ladder's cut values (ordered ladders): needed to place `now` between them. */
   cuts?: number[] | null;
+  /** The underlying's live price: a marker that glides along the x axis as the price ticks. */
+  now?: { value: number; label: string } | null;
   /** Draw the market's likely range as a bracket under the axis (it still sets the zoom either way). */
   likelyBracket?: boolean;
   /** The view is being dragged: bars glide together (no wave) so they keep up with the pointer. */
   live?: boolean;
+}
+
+/**
+ * Where a value falls on the outcome axis, in outcome units: outcome j spans [j, j+1). Between two
+ * cuts it's linear; beyond the first or last cut it extends by the neighbouring cut spacing.
+ */
+function outcomePosition(v: number, cuts: number[]): number {
+  const k = cuts.length;
+  if (k === 0) return 0.5;
+  if (k === 1) return v < cuts[0] ? 0.5 : 1.5;
+  if (v < cuts[0]) return Math.max(0.12, 1 - (cuts[0] - v) / (cuts[1] - cuts[0]));
+  if (v >= cuts[k - 1]) return Math.min(k + 0.88, k + (v - cuts[k - 1]) / (cuts[k - 1] - cuts[k - 2]));
+  let j = 1;
+  while (j < k && v >= cuts[j]) j++;
+  return j + (v - cuts[j - 1]) / (cuts[j] - cuts[j - 1]);
 }
 
 /** Rough rendered width of a short SVG label, for keeping labels on one row apart. */
@@ -103,6 +120,7 @@ export function ProfitChart({
   outcome = null,
   outcomeLabel,
   cuts = null,
+  now = null,
   likelyBracket = true,
   live = false,
 }: ProfitChartProps) {
@@ -142,7 +160,10 @@ export function ProfitChart({
 
   // The live price ticks every few seconds; its marker glides on its own, shorter timeline so the
   // bars (which only change when the position is re-solved) never move with it.
+  const showNow = !!now && ordered && !!cuts && cuts.length === n - 1;
   // Empty when hidden, so the marker appears in place (a length change snaps) instead of sliding in.
+  const nowGoal = showNow ? [outcomePosition(now!.value, cuts!)] : [];
+  const nowU = useMorph(nowGoal, 700)[0] ?? 0;
 
   const top = 30;
   const bracket = !!likely && likelyBracket;
@@ -190,6 +211,12 @@ export function ProfitChart({
   const clearLeft = hintLeft ? left + 2 + textWidth(hintLeft, HINT_PX) + 10 + zoneHalf : -Infinity;
   const clearRight = hintRight ? right - 2 - textWidth(hintRight, HINT_PX) - 10 - zoneHalf : Infinity;
 
+  // The "now" marker: x from the gliding position; if the price is outside the window, a pill at that edge.
+  const nowX = showNow ? left + (nowU - w0) * step : 0;
+  const nowSide: "in" | "left" | "right" = nowX < left ? "left" : nowX > right ? "right" : "in";
+  const nowText = showNow ? (nowSide === "left" ? `← Now ${now!.label}` : nowSide === "right" ? `Now ${now!.label} →` : `Now ${now!.label}`) : "";
+  const pillW = textWidth(nowText, 11.5) + 8;
+  const pillX = Math.min(right - pillW, Math.max(left, (nowSide === "in" ? nowX : nowSide === "left" ? left : right) - pillW / 2));
 
   const pick = (clientX: number, el: SVGSVGElement) => {
     const px = clientX - el.getBoundingClientRect().left;
@@ -340,7 +367,7 @@ export function ProfitChart({
             ? (() => {
                 // Breakevens get first claim on the axis, then the regular stride; a label is drawn
                 // only where it clears the ones already placed (and the "Now" pill).
-                const taken: [number, number][] = [];
+                const taken: [number, number][] = showNow ? [[pillX - 4, pillX + pillW + 4]] : [];
                 const cands = cutLabels
                   .map((l, i) => ({ l, i, px: slotX(i + 1), isBe: breakevens.includes(i + 1) }))
                   .filter((c) => visible(c.px) && (c.isBe || (c.i + 1 - wa) % stride === 0))
@@ -394,6 +421,23 @@ export function ProfitChart({
             <text x={right - 2} y={top - 8} textAnchor="end" fontSize={HINT_PX} fill={COLORS.smoke} className="fade-in">
               {hintRight}
             </text>
+          )}
+
+          {/* now: the live price, kept quiet: a thin dashed amber line, a small dot on the break-even line,
+              and a plain amber label under the axis (violet is your curve) */}
+          {showNow && (
+            <g pointerEvents="none" aria-hidden="true">
+              {nowSide === "in" && (
+                <>
+                  <line x1={nowX} x2={nowX} y1={top - 22} y2={yBase + 2} stroke={COLORS.live} strokeWidth={1} strokeDasharray="3 3" strokeOpacity={0.7} />
+                  <circle cx={nowX} cy={y0} r={3} fill={COLORS.live} stroke={COLORS.white} strokeWidth={1.25} />
+                </>
+              )}
+              <rect x={pillX} y={yBase + 5} width={pillW} height={16} rx={4} fill={COLORS.white} />
+              <text x={pillX + pillW / 2} y={yBase + 17} textAnchor="middle" fontSize={11.5} fontWeight={600} fill={COLORS.live} className="tnum">
+                {nowText}
+              </text>
+            </g>
           )}
 
           {/* market's likely range */}

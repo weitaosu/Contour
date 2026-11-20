@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 import Link from "next/link";
-import { LogoMark } from "@/components/Logo";
+import { Logo } from "@/components/Logo";
 import { WalletButton } from "@/components/WalletButton";
 import { s } from "./styles";
 
@@ -29,9 +29,8 @@ export function LandingNav({
   return (
     <header className={`sticky top-0 z-40 border-b border-[rgba(0,0,0,0.06)] bg-white/90 backdrop-blur-md ${className}`} style={style}>
       <nav aria-label="Main" className="mx-auto flex h-[72px] max-w-[1440px] items-center gap-3 px-4 sm:gap-8 sm:px-6 md:px-10">
-        <Link href="/" aria-label="Contour home" className="flex shrink-0 items-center gap-2.5">
-          <LogoMark size={28} />
-          <span className={`${s.display} text-[20px] tracking-[-0.02em] ${app ? "hidden sm:inline" : ""}`}>Contour</span>
+        <Link href="/" aria-label="Contour home" className="flex shrink-0 items-center">
+          <Logo />
         </Link>
         <ul className={`${app ? "flex" : "hidden md:flex"} items-center gap-1`}>
           {LINKS.map((l) => {

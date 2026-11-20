@@ -178,7 +178,7 @@ export function PositionScreen({ pubkey }: { pubkey: string }) {
             <div className="mt-4 flex items-start gap-2.5 rounded-[16px] bg-gain/10 px-4 py-3 text-[14px] text-inkstone" role="status">
               <CircleCheck size={18} strokeWidth={2.25} className="mt-px shrink-0 text-gain" aria-hidden="true" />
               <span>
-                <b>Payment confirmed.</b> {usd(stake)} test USDC went to Contour on {networkLabel}
+                <b>Payment confirmed.</b> {usd(stake)} {payTo ? "in devnet SOL" : "test USDC"} went to Contour on {networkLabel}
                 {openedSig ? (
                   <>
                     {" "}
@@ -252,7 +252,7 @@ export function PositionScreen({ pubkey }: { pubkey: string }) {
           <PositionActions pubkey={pubkey} chain={chain} />
 
           <div className="mt-auto grid grid-cols-3 gap-2 pt-6">
-            <Tile compact label="You paid" value={usd(stake)} sub="test USDC" />
+            <Tile compact label="You paid" value={usd(stake)} sub={payTo ? "in devnet SOL" : "test USDC"} />
             <Tile compact label="Best case" value={<span className="text-gain">+{usd(Math.max(0, best - stake))}</span>} sub={`${usd(best)} paid out`} />
             <Tile compact label="Settles" value={expiryTs ? untilLabel(new Date(expiryTs * 1000).toISOString(), now) : "—"} sub={expiryTs ? settleLabel(new Date(expiryTs * 1000).toISOString()) : ""} />
           </div>
@@ -340,7 +340,7 @@ function OnChain({ view, stake, pubkey }: { view: PositionView | null; stake: nu
   if (p?.owner) rows.push(["From", link(explorerAddr(p.owner), short(p.owner, 6))]);
   if (p?.pay_to) rows.push(["To", link(explorerAddr(p.pay_to), short(p.pay_to, 6))]);
   else rows.push(["Position", link(explorerAddr(pubkey), short(pubkey, 6))]);
-  rows.push(["Amount", <span key="a" className="tnum">{usd(stake)} test USDC</span>]);
+  rows.push(["Amount", <span key="a" className="tnum">{usd(stake)} {p?.pay_to ? "in devnet SOL" : "test USDC"}</span>]);
   if (p?.settled_sig) rows.push(["Settled", link(explorerTx(p.settled_sig), short(p.settled_sig, 8))]);
   rows.push(["Network", networkLabel]);
   return (

@@ -4,6 +4,7 @@ import "./globals.css";
 import { Providers } from "@/components/Providers";
 import { Nav } from "@/components/Nav";
 import { Footer } from "@/components/Footer";
+import { GrokChat } from "@/components/GrokChat";
 import { THEME_SCRIPT } from "@/components/ThemeToggle";
 
 const inter = Inter({ subsets: ["latin"], weight: ["500", "700"], variable: "--font-inter", display: "swap" });
@@ -25,6 +26,7 @@ export default function RootLayout({ children }: Readonly<{ children: React.Reac
           <Nav />
           <main className="flex-1">{children}</main>
           <Footer />
+          <GrokChat />
         </Providers>
       </body>
     </html>

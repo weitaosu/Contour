@@ -39,11 +39,42 @@ const EXAMPLE_DATE = new Date(exampleLadder.capturedAt).toLocaleDateString("en-U
 /** The white, violet-ringed style of the panels you work in (as inside a market). */
 const FOCUS = "bg-porcelain shadow-[0_0_0_1.5px_rgba(89,79,244,0.28),0_12px_32px_-14px_rgba(89,79,244,0.45)]";
 
+/**
+ * Whether a ladder's odds look roughly like a bell curve, so the preview's curve and payouts read well:
+ * - little in the two open-ended tail buckets (≤ 25% together), unlike a flat ladder that piles
+ *   its odds at both ends;
+ * - one clear peak away from the ends, at least twice an even share;
+ * - falling away from that peak on both sides, allowing small wiggles (≤ 3 points) from thin quotes.
+ */
+function bellShaped(p: number[]): boolean {
+  const n = p.length;
+  if (n < 5) return false;
+  const total = p.reduce((a, b) => a + b, 0) || 1;
+  const q = p.map((x) => x / total);
+  if (q[0] + q[n - 1] > 0.25) return false;
+  const peak = q.indexOf(Math.max(...q));
+  if (peak === 0 || peak === n - 1 || q[peak] < 2 / n) return false;
+  const WIGGLE = 0.03;
+  // Walking out from the peak, the odds may only rise a little above the lowest seen so far.
+  for (const dir of [-1, 1]) {
+    let low = q[peak];
+    for (let i = peak + dir; i >= 0 && i < n; i += dir) {
+      if (q[i] > low + WIGGLE) return false;
+      low = Math.min(low, q[i]);
+    }
+  }
+  return true;
+}
+
+/**
+ * The market the preview shows: the nearest-dated SOL price ladder (at least a day out) whose odds
+ * are bell-shaped; if none is, the nearest SOL ladder; failing that, any price ladder.
+ */
 function pickFeatured(ms: MarketSummary[]): MarketSummary | undefined {
   const dayAhead = Date.now() + 24 * 3600_000;
   const sol = ms.filter((m) => m.kind === "threshold" && m.ticker.startsWith("SOL") && new Date(m.expiry).getTime() > dayAhead);
   sol.sort((a, b) => a.expiry.localeCompare(b.expiry));
-  return sol[0] ?? ms.find((m) => m.kind === "threshold");
+  return sol.find((m) => bellShaped(m.marketProb)) ?? sol[0] ?? ms.find((m) => m.kind === "threshold");
 }
 
 /**

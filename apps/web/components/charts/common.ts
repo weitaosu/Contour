@@ -11,6 +11,8 @@ export const COLORS = {
   cloud: "var(--color-cloud)",
   /** The raised surface (white in light mode): marker centers, label backings. */
   white: "var(--color-porcelain)",
+  /** Today's live price: amber, so it never reads as your curve (violet) or a gain (green). Dark enough for white text. */
+  live: "#a85f00",
 };
 
 /** Shared horizontal layout so the probability and payout charts line up bucket for bucket. */
