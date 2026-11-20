@@ -1,9 +1,10 @@
 "use client";
 
-import { Fragment, useId, useMemo, useState, type ReactNode } from "react";
+import { useId, useMemo, useState, type ReactNode } from "react";
 import { ChevronDown } from "lucide-react";
 import { paysIn, type Ladder, type Quote } from "@contour/core";
 import { Segmented } from "@/components/ui/Segmented";
+import { ScenarioTable } from "./ScenarioTable";
 import { COLORS } from "@/components/charts/common";
 import { GAIN } from "@/components/charts/ProfitChart";
 import { isWin } from "@/lib/outcomes";
@@ -47,7 +48,6 @@ const money = (x: number) => {
 /** For sentences: rounding cash left over from a lost contract reads as nothing, not "$0.01". */
 const left = (x: number) => (x < 0.5 ? "nothing" : money(x));
 const leftShort = (x: number) => (x < 0.5 ? "$0" : money(x));
-const probPct = (p: number) => (p <= 0 ? "0%" : p < 0.005 ? "<1%" : `${Math.round(p * 100)}%`);
 const times = (a: number, b: number) => {
   const t = a / b;
   return t >= 2.95 ? `${Math.round(t)}×` : `${t.toFixed(1)}×`;
@@ -234,7 +234,7 @@ export function ReturnOdds({
       </button>
 
       {open && (
-        <div id={bodyId} className="grid gap-7 px-4 pb-4">
+        <div id={bodyId} className="grid grid-cols-[minmax(0,1fr)] gap-7 px-4 pb-4">
           {!data || !c ? (
             <p className="text-[13.5px] text-slate">Once you have a trade, this shows how likely each result is next to the single best contract.</p>
           ) : (
@@ -276,11 +276,10 @@ export function ReturnOdds({
               </div>
 
               <div>
-                <Heading title="Every result, and how likely" hint={`What your ${money(stake)} turns into when the market settles. Best at the top.`} />
-                <Takeaway>
-                  <SpreadTakeaway name={mine} hedge={data.hedge} single={data.single} />
-                </Takeaway>
-                <ReturnBins stake={stake} name={mine} hedge={data.hedge} single={data.single} />
+                <Heading title="Profit or loss at settlement" hint="What each position would make or lose, for every final outcome, and how likely each is." />
+                <div className="mt-3 rounded-[18px] bg-porcelain p-3">
+                  <ScenarioTable ladder={ladder} quote={quote} stake={stake} probs={probs} oddsBasis={basis === "you" ? "your forecast" : "the market's prices"} />
+                </div>
               </div>
 
               <p className="text-[12px] leading-snug text-smoke">
@@ -342,24 +341,6 @@ function DotTakeaway({ stake, hedge, single }: { stake: number; hedge: Profile; 
           When one contract loses, <b>{leftShort(single.lossKeep ?? 0)}</b> comes back on average ({sl} of 100).
         </>
       )}
-    </>
-  );
-}
-
-function SpreadTakeaway({ name, hedge, single }: { name: string; hedge: Profile; single: Profile }) {
-  const one =
-    single.distinct <= 2 ? (
-      <>
-        one contract is all or nothing: <b>{leftShort(single.low)}</b> or <b>{money(single.high)}</b>, nothing in between
-      </>
-    ) : (
-      <>
-        one contract runs from <b>{leftShort(single.low)}</b> to <b>{money(single.high)}</b>
-      </>
-    );
-  return (
-    <>
-      {name === "This hedge" ? "The hedge" : "Your bet"}&apos;s results sit between <b>{leftShort(hedge.low)}</b> and <b>{money(hedge.high)}</b>; {one}.
     </>
   );
 }
@@ -459,98 +440,5 @@ function DotCard({
         </ul>
       </div>
     </figure>
-  );
-}
-
-/** Chance of each range of money back, the two bets as paired bars on one scale, with the stake marked. */
-function ReturnBins({ stake, name, hedge, single }: { stake: number; name: string; hedge: Profile; single: Profile }) {
-  const used = EDGES.map((_, i) => hedge.bins[i] > 0.0005 || single.bins[i] > 0.0005);
-  const lo = used.indexOf(true);
-  const hi = used.lastIndexOf(true);
-  if (lo < 0) return null;
-  const label = (i: number) => {
-    const top = stake * (1 + EDGES[i]);
-    const bottom = i === 0 ? 0 : stake * (1 + EDGES[i - 1]);
-    if (i === 0) return `Under ${money(top)}`;
-    if (!Number.isFinite(top)) return `Over ${money(bottom)}`;
-    return `${money(bottom)}–${money(top)}`;
-  };
-  const rows = EDGES.map((_, i) => i).slice(lo, hi + 1).reverse();
-  const max = Math.max(...rows.map((i) => Math.max(hedge.bins[i], single.bins[i])), 0.01);
-  const firstLoss = rows.findIndex((i) => EDGES[i] <= 0);
-  return (
-    <div className="mt-3 rounded-[18px] bg-porcelain p-3">
-      <div className="mb-2 flex justify-end gap-4 text-[12.5px] text-slate" aria-hidden="true">
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-[3px] bg-signal-violet" /> {name}
-        </span>
-        <span className="flex items-center gap-1.5">
-          <span className="h-2.5 w-2.5 rounded-[3px]" style={{ background: COLORS.smoke }} /> One contract
-        </span>
-      </div>
-      <table className="w-full border-collapse text-[13px]">
-        <caption className="sr-only">Chance of each range of money back, {name.toLowerCase()} and one contract</caption>
-        <thead className="sr-only">
-          <tr>
-            <th scope="col">Money back</th>
-            <th scope="col">Chance, {name.toLowerCase()} and one contract</th>
-          </tr>
-        </thead>
-        <tbody>
-          {rows.map((i, k) => {
-            const gain = EDGES[i] > 0;
-            const empty = hedge.bins[i] <= 0.0005 && single.bins[i] <= 0.0005;
-            return (
-              <Fragment key={i}>
-                {k === firstLoss && firstLoss > 0 && (
-                  <tr aria-hidden="true">
-                    <td colSpan={2} className="py-1.5">
-                      <div className="flex items-center gap-2 text-[11.5px] font-bold text-slate">
-                        <span className="h-0 flex-1 border-t-[1.5px] border-dashed border-ash" />
-                        Your {money(stake)} back · above: you make money, below: you lose some
-                        <span className="h-0 flex-1 border-t-[1.5px] border-dashed border-ash" />
-                      </div>
-                    </td>
-                  </tr>
-                )}
-                <tr>
-                  <th
-                    scope="row"
-                    className={`w-[7.5rem] whitespace-nowrap pr-3 text-left align-middle ${empty ? "py-0 text-[12px] font-normal text-smoke" : `py-1 ${gain ? "font-bold text-gain-deep" : "font-normal text-slate"}`}`}
-                  >
-                    {label(i)}
-                  </th>
-                  <td className={`align-middle ${empty ? "py-0" : "py-1"}`}>
-                    {empty ? (
-                      <span className="block text-[11.5px] leading-[18px] text-smoke">no chance either way</span>
-                    ) : (
-                      <>
-                        <Bar p={hedge.bins[i]} max={max} color={COLORS.violet} label={name} />
-                        <Bar p={single.bins[i]} max={max} color={COLORS.smoke} label="One contract" />
-                      </>
-                    )}
-                  </td>
-                </tr>
-              </Fragment>
-            );
-          })}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-function Bar({ p, max, color, label }: { p: number; max: number; color: string; label: string }) {
-  const none = p <= 0.0005;
-  return (
-    <div className="flex h-[15px] items-center gap-2" aria-label={`${label}: ${probPct(p)}`}>
-      <span className="relative h-[11px] flex-1">
-        <span
-          className="absolute inset-y-0 left-0 rounded-[3px]"
-          style={{ width: `${none ? 0 : Math.max(0.6, (p / max) * 100)}%`, background: color, transition: "width 480ms cubic-bezier(.65,0,.35,1)" }}
-        />
-      </span>
-      <span className={`tnum w-9 text-right text-[12.5px] ${none ? "text-ash" : "font-bold text-inkstone"}`}>{none ? "–" : probPct(p)}</span>
-    </div>
   );
 }

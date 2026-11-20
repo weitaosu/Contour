@@ -33,11 +33,10 @@ import { useChainConfig } from "@/lib/chain";
 import { notableUnused, pct, settleLabel, untilLabel, usd } from "@/lib/format";
 import { isWin, runs, whenPhrase } from "@/lib/outcomes";
 import { ProbabilityChart } from "@/components/charts/ProbabilityChart";
-import { Slider } from "@/components/ui/Slider";
-import { Expectation, KeyNumbers, ProfitSummary, type SummaryStatus } from "./ProfitCard";
+import { KeyNumbers, ProfitSummary, type SummaryStatus } from "./ProfitCard";
 import { ProtectCard, ProtectControls, ProtectNotes } from "./ProtectCard";
 import { MORE_STRATEGIES, MORE_STRATEGIES_ENABLED, type StrategyKey } from "./strategies";
-import { CompareMini } from "./ComparisonCard";
+import { ProtectionScenarioTable } from "./ScenarioTable";
 import { LegsTable } from "./LegsPanel";
 import { Fill, Panel, StepBadge } from "./Panel";
 import { CandidateEditor } from "./CandidateEditor";
@@ -50,15 +49,6 @@ import { FrozenBanner, SampleBanner } from "@/components/FrozenBanner";
 import { CHART_MS, liveFill, useLive } from "@/lib/live";
 import { networkName } from "@/lib/env";
 import { LiveDot, LivePrice, TickNumber, spotText } from "./LivePrice";
-
-/** A length of time in plain words: "12 days", "3 months", "1.5 years". */
-function timeSpan(ms: number): string {
-  const days = Math.abs(ms) / 86_400_000;
-  if (days < 45) return `${Math.max(1, Math.round(days))} ${Math.round(days) === 1 ? "day" : "days"}`;
-  const months = days / 30.44;
-  if (months < 18) return `${Math.round(months)} months`;
-  return `${(Math.round((months / 12) * 10) / 10).toString()} years`;
-}
 
 /** New positions stop this long before a market settles (matches the desk's CLOSE_BUFFER_MS). */
 const CLOSE_BUFFER_MS = 10 * 60_000;
@@ -526,20 +516,7 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
       return `$${r.toLocaleString("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}${ladder.unit.suffix}`;
     return formatValue(r, ladder.unit);
   };
-  // The market's 2-in-3 range: the shortest run of outcomes holding at least 2/3 of its odds. Shown
-  // beside your own "2 in 3 chance" range so the two captions measure the same thing.
-  const marketTwoInThree = useMemo(() => {
-    if (!ordered || !ladder.cuts) return null;
-    const [a, b] = likelyRange(ladder.marketProb, 2 / 3);
-    const lo = a === 0 ? null : fmt(ladder.cuts[a - 1]);
-    const hi = b === ladder.cuts.length ? null : fmt(ladder.cuts[b]);
-    const date = !!ladder.unit.date;
-    return lo && hi ? `${lo}–${hi}` : lo ? `${lo} or ${date ? "later" : "above"}` : hi ? `${date ? "before" : "below"} ${hi}` : null;
-  }, [ladder, ordered]); // eslint-disable-line react-hooks/exhaustive-deps
-  const fmtCenter = fmt(center);
   const width = range.sd * scale;
-  // On a date ladder the width is a length of time ("±3 months"), not a date.
-  const widthLabel = ladder.unit.date ? timeSpan(width) : fmt(width);
   // The view in plain terms. One bell: a 2-in-3 likely range (center ± one standard deviation).
   // Big move: two humps either side of the midpoint, each with its own ± width.
   const humps = split ? ([center - splitOffset * range.sd, center + splitOffset * range.sd] as const) : null;
@@ -610,47 +587,6 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
 
   const hasPosition = started || protecting || spreading;
   const shaping = ordered && !protecting && !ranging && !spreading;
-  // Fine-tune: the same view as the curve, as two compact sliders right under the chart.
-  const tune = shaping ? (
-    <div className="mt-2 grid gap-x-6 gap-y-3 border-t border-mist pt-2.5 sm:grid-cols-2">
-      <Slider
-        compact
-        label={humps ? "Midpoint" : "Where"}
-        value={center}
-        min={range.lo}
-        max={range.hi}
-        step={range.sd / 100}
-        onChange={(v) => {
-          custom();
-          setCenter(v);
-          setEdit(false);
-        }}
-        display={fmtCenter}
-        valueText={humps ? `Midpoint ${fmtCenter}, humps near ${fmt(humps[0])} and ${fmt(humps[1])}` : `Center ${fmtCenter}`}
-        caption={humps ? `humps at ${fmt(humps[0])} and ${fmt(humps[1])}` : marketTwoInThree ? `market's 2 in 3: ${marketTwoInThree}` : "the middle of your view"}
-      />
-      <Slider
-        compact
-        label="How sure"
-        value={2 - scale}
-        min={0.4}
-        max={1.6}
-        step={0.01}
-        onChange={(v) => {
-          custom();
-          setScale(Math.round((2 - v) * 100) / 100);
-          setEdit(false);
-        }}
-        display={humps ? `each ±${widthLabel}` : `±${widthLabel}`}
-        valueText={
-          humps
-            ? `Each hump plus or minus ${widthLabel}`
-            : `2 in 3 chance between ${fmt(center - width)} and ${fmt(center + width)}, ${scale.toFixed(2)} times the market's spread`
-        }
-        caption={humps ? "narrower: a sharper move" : `2 in 3 chance: ${fmt(center - width)}–${fmt(center + width)}`}
-      />
-    </div>
-  ) : null;
   const drawToggle = shaping ? (
     <button
       type="button"
@@ -672,33 +608,33 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
 
   // The details, each in its own compact panel, always in full: nothing hides behind tabs or scrolling.
   const fade = `transition-opacity duration-300 ${tradable ? "" : "opacity-45"}`;
-  const moneyPanel =
-    !protecting ? (
-      <Panel id="money" title="What to expect" className="max-lg:order-6" bodyClassName={fade}>
-        <Expectation quote={display} stake={stake} used={stake - kept} hasView={!spreading} confidence={spreading ? null : confidence} />
-      </Panel>
-    ) : null;
   const comparing = !protecting && !summaryStatus && hasPosition && !!display.comparison;
   // A position whose money put in is all-or-nothing (one contract plus cash held back) isn't a hedge:
   // the ticket and the results dropdown say it's a smaller bet instead.
   const sizing = !protecting && !spreading && hasPosition && display.legs.length > 0 ? spreadOf(display, ladder.marketProb) : null;
   const oneBet = sizing && !sizing.spread ? sizing : null;
-  const comparePanel = !protecting ? (
-    <Panel id="compare" title="vs betting on one contract" className="max-lg:order-7" bodyClassName={comparing ? fade : ""}>
-      {comparing ? (
-        <CompareMini quote={display} stake={stake} />
-      ) : (
-        // Only once there's a real position: before that it would weigh a bet against nothing.
-        <p className="text-[13.5px] text-slate">Once you have a trade, this shows how it stacks up against putting everything on the single best contract.</p>
-      )}
-    </Panel>
-  ) : null;
+  // Protection: the holding alone vs the holding plus the strategy, per final outcome (see
+  // lib/scenarios). Other positions show their profit-or-loss table inside the results dropdown.
+  const scenarioPanel =
+    protecting && protectQuote ? (
+      <Panel id="scenarios" title="Profit or loss at settlement" hint="What each position would make or lose, for every final outcome." className="max-lg:order-7" bodyClassName={fade}>
+        <ProtectionScenarioTable
+          ladder={ladder}
+          quote={display}
+          cost={display.stakeBase / 1e6}
+          holdingChange={protectQuote.protection.holdingChange}
+          units={units}
+          name={name}
+          strategyName={covering ? "Covered call" : collaring ? "Collar" : "Protection"}
+        />
+      </Panel>
+    ) : null;
   const contractsPanel = (
     <Panel
       id="contracts"
       title={display.legs.length ? `The ${display.legs.length} ${display.legs.length === 1 ? "contract" : "contracts"} you'd buy` : "The contracts you'd buy"}
       right={<span className="text-smoke">at Gemini&apos;s asks</span>}
-      className="max-lg:order-8"
+      className="max-lg:order-6"
       bodyClassName={fade}
     >
       <LegsTable quote={display} paper={true} crossed={crossed} compact />
@@ -892,7 +828,6 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
                       />
                     )}
                   </Fill>
-                  {tune}
                 </Panel>
               ) : (
                 <Panel
@@ -972,26 +907,24 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
             )}
           </div>
 
-          {!protecting && (
-            <section aria-label="Key numbers" className="min-w-0 rounded-[24px] bg-cloud p-2 max-lg:order-4">
-              <KeyNumbers ladder={ladder} quote={display} stake={stake} belief={spreading ? null : solveBelief} faded={!!summaryStatus} />
-            </section>
-          )}
 
-          <div
-            className={`grid items-stretch gap-2 max-lg:contents ${
-              protecting ? "lg:grid-cols-[minmax(0,1.25fr)_minmax(0,1fr)]" : "lg:grid-cols-[minmax(0,1fr)_minmax(0,0.95fr)_minmax(0,1.15fr)]"
-            }`}
-          >
-            {moneyPanel}
-            {comparePanel}
+          {/* Under the charts: the four key numbers (two by two) beside the contracts you'd buy, then
+              (below the order ticket's row) the results dropdown. Protection has no key numbers or
+              dropdown: its notes sit beside the contracts and its outcome table follows. */}
+          <div className="grid items-stretch gap-2 max-lg:contents lg:grid-cols-2">
+            {!protecting && (
+              <section aria-label="Key numbers" className="min-w-0 rounded-[24px] bg-cloud p-2 max-lg:order-4">
+                <KeyNumbers ladder={ladder} quote={display} stake={stake} belief={spreading ? null : solveBelief} faded={!!summaryStatus} square />
+              </section>
+            )}
             {contractsPanel}
             {protecting && protectQuote && (
-              <Panel id="notes" title="Good to know" className="max-lg:order-7">
+              <Panel id="notes" title="Good to know" className="max-lg:order-8">
                 <ProtectNotes ladder={ladder} quote={display} protection={protectQuote.protection} name={name} />
               </Panel>
             )}
           </div>
+          {scenarioPanel}
         </div>
 
         {/* The order ticket: its top lines up with the outlook, controls first, then the summary and

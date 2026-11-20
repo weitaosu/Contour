@@ -182,6 +182,7 @@ export const KeyNumbers = memo(function KeyNumbers({
   stake,
   belief,
   faded = false,
+  square = false,
 }: {
   ladder: Ladder;
   quote: Omit<Quote, "raw">;
@@ -189,6 +190,8 @@ export const KeyNumbers = memo(function KeyNumbers({
   /** The user's view; null for positions with no view (spreads), which hides "by yours". */
   belief: number[] | null;
   faded?: boolean;
+  /** Two by two at every width (beside another panel), instead of one row of four on wide screens. */
+  square?: boolean;
 }) {
   const payouts = quote.payoutByBucket;
   const wins = payouts.map((p) => isWin(p, stake));
@@ -198,7 +201,7 @@ export const KeyNumbers = memo(function KeyNumbers({
   const chanceMkt = ladder.marketProb.reduce((s, p, j) => s + (wins[j] ? p : 0), 0);
   const chanceYou = belief ? belief.reduce((s, p, j) => s + (wins[j] ? p : 0), 0) : null;
   return (
-    <div className={`grid grid-cols-2 gap-2 transition-opacity duration-300 lg:grid-cols-4 ${faded ? "opacity-45" : ""}`}>
+    <div className={`grid grid-cols-2 gap-2 transition-opacity duration-300 ${square ? "h-full auto-rows-fr" : "lg:grid-cols-4"} ${faded ? "opacity-45" : ""}`}>
       <Tile
         compact
         label="Most you can make"
