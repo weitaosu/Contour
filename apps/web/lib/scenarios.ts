@@ -1,4 +1,4 @@
-import { costPerContract, formatValue, paysIn, tradingFeeUsd, type Ladder, type Quote } from "@contour/core";
+import { formatValue, paysIn, type Ladder, type Quote } from "@contour/core";
 
 /**
  * What each position would make or lose at settlement, for every final outcome, as table rows.
@@ -6,8 +6,9 @@ import { costPerContract, formatValue, paysIn, tradingFeeUsd, type Ladder, type 
  * - Contour P&L: what all its YES/NO contracts pay in that outcome, plus the budget it didn't
  *   spend, minus the whole budget. Fees are already in it (they came out of the budget).
  * - Single contract P&L: the quote's benchmark contract (the best single contract for the same
- *   forecast), bought with about what Contour spends, fees included. Winning contracts pay $1,
- *   losing ones $0, less the purchase cost and fee.
+ *   forecast), bought with the whole budget, as in the "How likely is each result?" comparison, so
+ *   the two always agree. Winning contracts pay $1, losing ones $0, less the purchase cost and fee
+ *   (any budget it can't spend comes back either way).
  * - Difference: Contour minus single. Positive means Contour does better there.
  *
  * Adjacent outcomes become one row when all three amounts match to the cent; any change starts a
@@ -38,7 +39,6 @@ export interface Benchmark {
 }
 
 const cents = (x: number) => Math.round(x * 100) / 100;
-const floorTo = (x: number, step: number) => Math.floor(x / step + 1e-9) * step;
 
 /** A run of outcomes as a short scenario name: "Below $72", "$72–$74", "$80 or above". */
 export function scenarioLabel(ladder: Ladder, a: number, b: number) {
@@ -68,9 +68,6 @@ function mergeRows(ladder: Ladder, a: number[], b: number[]): ScenarioRow[] {
   return rows;
 }
 
-/** What Contour spends: its contracts plus their fees (the rest of the budget is never spent). */
-export const contourSpend = (quote: Q) => quote.legs.reduce((s, l) => s + l.usd, 0) + quote.feesUsd;
-
 /** Contour's P&L per outcome, from its contracts: each pays $1 where it wins, plus unspent cash, less the budget. */
 export function contourPnl(ladder: Ladder, quote: Q, budget: number) {
   return ladder.bucketLabels.map((_, j) => {
@@ -79,20 +76,13 @@ export function contourPnl(ladder: Ladder, quote: Q, budget: number) {
   });
 }
 
-/** The quote's benchmark contract, re-sized so contracts + fee come to about what Contour spends. */
+/** The quote's benchmark contract as quoted: all of the budget on it (contracts + fee fit in the stake). */
 export function benchmark(ladder: Ladder, quote: Q): (Benchmark & { index: number }) | null {
   const c = quote.comparison;
-  if (!c) return null;
+  if (!c || !(c.qty > 0)) return null;
   const index = ladder.instruments.findIndex((i) => i.symbol === c.symbol);
   if (index < 0) return null;
-  const spend = contourSpend(quote);
-  const step = ladder.instruments[index].qtyStep || 1;
-  let qty = floorTo(spend / costPerContract(c.price, quote.feeRate), step);
-  while (qty > 0 && qty * c.price + tradingFeeUsd(qty, c.price, quote.feeRate) > spend + 1e-9) qty = floorTo(qty - step, step);
-  qty = Math.round(qty * 1e6) / 1e6;
-  if (!(qty > 0)) return null;
-  const fee = tradingFeeUsd(qty, c.price, quote.feeRate);
-  return { index, label: c.label, side: c.side, price: c.price, qty, fee, cost: qty * c.price + fee };
+  return { index, label: c.label, side: c.side, price: c.price, qty: c.qty, fee: c.fee, cost: c.qty * c.price + c.fee };
 }
 
 /** The scenario table for a hedge: single contract vs Contour, per outcome. */
@@ -101,7 +91,7 @@ export function scenarioTable(ladder: Ladder, quote: Q, budget: number) {
   if (!one || !quote.legs.length) return null;
   const single = ladder.bucketLabels.map((_, j) => (paysIn(ladder, one.index, one.side, j) ? one.qty : 0) - one.cost);
   const contour = contourPnl(ladder, quote, budget);
-  return { benchmark: one, spend: contourSpend(quote), rows: mergeRows(ladder, single, contour) };
+  return { benchmark: one, rows: mergeRows(ladder, single, contour) };
 }
 
 /**

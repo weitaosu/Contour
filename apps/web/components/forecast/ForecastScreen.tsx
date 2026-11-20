@@ -33,14 +33,14 @@ import { useChainConfig } from "@/lib/chain";
 import { notableUnused, pct, settleLabel, untilLabel, usd } from "@/lib/format";
 import { isWin, runs, whenPhrase } from "@/lib/outcomes";
 import { ProbabilityChart } from "@/components/charts/ProbabilityChart";
-import { KeyNumbers, ProfitSummary, type SummaryStatus } from "./ProfitCard";
+import { ProfitSummary, type SummaryStatus } from "./ProfitCard";
 import { ProtectCard, ProtectControls, ProtectNotes } from "./ProtectCard";
 import { MORE_STRATEGIES, MORE_STRATEGIES_ENABLED, type StrategyKey } from "./strategies";
 import { ProtectionScenarioTable } from "./ScenarioTable";
 import { LegsTable } from "./LegsPanel";
 import { Fill, Panel, StepBadge } from "./Panel";
 import { CandidateEditor } from "./CandidateEditor";
-import { ReturnOdds } from "./ReturnOdds";
+import { ReturnOdds, ReturnVerdict } from "./ReturnOdds";
 import { spreadOf } from "@/lib/spread";
 import { OUTLOOKS, OutlookPicker, SPLIT_OFFSET, type Outlook } from "./OutlookPicker";
 import { ReviewDialog } from "./ReviewDialog";
@@ -908,14 +908,31 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
           </div>
 
 
-          {/* Under the charts: the four key numbers (two by two) beside the contracts you'd buy, then
-              (below the order ticket's row) the results dropdown. Protection has no key numbers or
-              dropdown: its notes sit beside the contracts and its outcome table follows. */}
-          <div className="grid items-stretch gap-2 max-lg:contents lg:grid-cols-2">
+          {/* Under the charts: the comparison's one-line takeaway against one contract, then the
+              results dropdown ("How likely is each result?", with the side-by-side numbers) beside the
+              contracts you'd buy. Top-aligned, so opening the dropdown never stretches the contracts
+              panel. Protection has neither: its notes sit beside the contracts and its table follows. */}
+          {!protecting && (
+            <ReturnVerdict
+              ladder={ladder}
+              quote={comparing ? display : { ...display, comparison: null }}
+              sizedDown={comparing ? oneBet : null}
+              faded={!!summaryStatus}
+              className="max-lg:order-4"
+            />
+          )}
+          {/* Dense flow: the details panel (its own Show/Hide toggle, then the settlement table and the
+              dots) spans both columns on the next row, and the contracts panel still takes the spot
+              beside the comparison card. */}
+          <div className="grid gap-2 max-lg:contents lg:grid-flow-row-dense lg:grid-cols-2 lg:items-start">
             {!protecting && (
-              <section aria-label="Key numbers" className="min-w-0 rounded-[24px] bg-cloud p-2 max-lg:order-4">
-                <KeyNumbers ladder={ladder} quote={display} stake={stake} belief={spreading ? null : solveBelief} faded={!!summaryStatus} square />
-              </section>
+              <ReturnOdds
+                ladder={ladder}
+                quote={comparing ? display : { ...display, comparison: null }}
+                sizedDown={comparing ? oneBet : null}
+                className="max-lg:order-7"
+                bodyClassName="max-lg:order-7 lg:col-span-2"
+              />
             )}
             {contractsPanel}
             {protecting && protectQuote && (
@@ -1162,18 +1179,6 @@ function Screen({ ladder, preset, offline, banner }: { ladder: Ladder; preset: P
           />
         </aside>
 
-        {/* How likely each result is, next to putting everything on one contract (closed until opened).
-            Its own row under the panels, so opening it never stretches the order ticket, which stays in
-            view beside it. */}
-        {!protecting && (
-          <ReturnOdds
-            ladder={ladder}
-            quote={comparing ? display : { ...display, comparison: null }}
-            belief={spreading ? null : solveBelief}
-            sizedDown={comparing ? oneBet : null}
-            className="max-lg:order-7 lg:col-start-1"
-          />
-        )}
       </div>
     </div>
   );
