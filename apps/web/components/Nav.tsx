@@ -2,23 +2,21 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
-import { History, LayoutGrid, Trophy } from "lucide-react";
+import { Briefcase, LayoutGrid } from "lucide-react";
 import { useSlidingPill } from "./ui/SlidingPill";
 import { useQuery } from "@tanstack/react-query";
 import { Logo } from "./Logo";
 import { WalletButton } from "./WalletButton";
-import { ThemeToggle } from "./ThemeToggle";
 import { desk } from "@/lib/desk";
 
 const links = [
-  { href: "/", label: "Markets", icon: LayoutGrid, hint: "Every market you can trade as one curve" },
-  { href: "/me", label: "Record", icon: Trophy, hint: "Your paper portfolio, valued live, and your forecast record" },
-  { href: "/replay", label: "Replay", icon: History, hint: "Past markets replayed: one contract versus the whole view" },
+  { href: "/markets", label: "Markets", icon: LayoutGrid, hint: "Every market you can trade as one curve" },
+  { href: "/me", label: "Portfolio", icon: Briefcase, hint: "Your wallet's positions, valued live" },
 ];
 
-// Position pages (/portfolio/<id>) live under the Record tab.
+// Position pages (/p/<pubkey>, and paper ones at /portfolio/<id>) live under the Portfolio tab.
 const isActive = (href: string, path: string) =>
-  href === "/" ? path === "/" || path.startsWith("/m/") : href === "/me" ? path.startsWith("/me") || path.startsWith("/portfolio") : path.startsWith(href);
+  href === "/markets" ? path.startsWith("/markets") || path.startsWith("/m/") : href === "/me" ? path.startsWith("/me") || path.startsWith("/portfolio") || path.startsWith("/p/") : path.startsWith(href);
 
 /**
  * The pages as one segmented control, like the pickers inside the app: a grey track, the
@@ -28,7 +26,7 @@ function PageSwitch({ path, full = false }: { path: string; full?: boolean }) {
   const current = links.find((l) => isActive(l.href, path))?.href ?? null;
   const { track, pill } = useSlidingPill(current);
   return (
-    <nav aria-label="Pages" ref={track} className={`relative ${full ? "grid grid-cols-3" : "flex"} items-center gap-0.5 rounded-full bg-cloud p-1`}>
+    <nav aria-label="Pages" ref={track} className={`relative ${full ? "grid grid-cols-2" : "flex"} items-center gap-0.5 rounded-full bg-cloud p-1`}>
       {pill}
       {links.map(({ href, label, icon: Icon, hint }) => {
         const on = isActive(href, path);
@@ -57,7 +55,9 @@ export function Nav() {
   const cfg = useQuery({ queryKey: ["config"], queryFn: desk.config, staleTime: 60_000 });
   const mode = cfg.data?.executionMode ?? "paper";
   // The front page and market pages are full-width workspaces; the bar lines up with them there.
-  const wide = path === "/" || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/replay") || path.startsWith("/portfolio");
+  // The landing page at / renders its own nav.
+  if (path === "/") return null;
+  const wide = path.startsWith("/markets") || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/portfolio") || path.startsWith("/p/");
   return (
     // Named, so page transitions leave it in place: the content moves, the bar stays.
     <header className="sticky top-0 z-30 border-b border-mist bg-canvas/90 backdrop-blur-md" style={{ viewTransitionName: "site-header" }}>
@@ -73,7 +73,6 @@ export function Nav() {
           <span className="tag hidden sm:inline-flex" title="Fills are simulated at live Gemini quotes">
             {mode === "paper" ? "Paper mode" : mode === "sandbox" ? "Sandbox" : "Live"}
           </span>
-          <ThemeToggle />
           <WalletButton />
         </div>
       </div>

@@ -17,7 +17,10 @@ const DEMO_LIVE = [
   { title: "Lower", shift: -0.8, scale: 0.85, stake: 350 },
 ];
 
-export function registerPaperRoutes(app: FastifyInstance, ctx: { db: DB; markets: MarketService }) {
+type Sell = (account: string, id: string, fraction: number, minProceedsUsd?: number) => Promise<{ sale: unknown; position: unknown }>;
+
+/** `sell`: replaces the plain practice-cash sale (the server's pays positions bought with SOL out in SOL). */
+export function registerPaperRoutes(app: FastifyInstance, ctx: { db: DB; markets: MarketService; sell?: Sell }) {
   // Quotes and fills the demo's live positions through the same path as any paper trade.
   async function openLive(account: string) {
     const { markets: list } = await ctx.markets.listMarkets();
@@ -88,6 +91,7 @@ export function registerPaperRoutes(app: FastifyInstance, ctx: { db: DB; markets
   app.post("/paper/:account/positions/:id/sell", async (req) => {
     const { account, id } = z.object({ account: Account, id: Id }).parse(req.params);
     const body = z.object({ fraction: z.number().gt(0).lte(1), minProceedsUsd: z.number().nonnegative().optional() }).parse(req.body);
+    if (ctx.sell) return ctx.sell(account, id, body.fraction, body.minProceedsUsd);
     const sale = await sellPosition(ctx.db, ctx.markets, account, id, body.fraction, body.minProceedsUsd);
     return { sale, position: await positionDetail(ctx.db, ctx.markets, account, id) };
   });

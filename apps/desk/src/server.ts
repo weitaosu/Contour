@@ -10,11 +10,13 @@ import { startRecorder } from "./recorder";
 import { SseHub } from "./sse";
 import { registerPositionRoutes } from "./routes/positions";
 import { registerPaperRoutes } from "./routes/paper";
-import { registerReplayRoutes } from "./routes/replay";
 import { registerHookRoutes } from "./routes/hooks";
 import { getChain } from "./chain";
 import { makeExecutor } from "./executor";
-import { handleStreamTx, recordDirectPayment, runScheduler, type HandlerCtx } from "./handler";
+import { handleStreamTx, runScheduler, type HandlerCtx } from "./handler";
+import { recordAddPayment, recordDirectPayment, sellForSol } from "./directPayments";
+import { registerChatRoutes } from "./chat";
+import { solUsd } from "./solPrice";
 import { PublicKey } from "@solana/web3.js";
 import { configPda } from "@contour/chain";
 
@@ -57,6 +59,9 @@ export async function buildServer() {
     // Demo direct-payment mode: buyers send USDC straight to this wallet instead of an escrow.
     payTo: config.payTo || null,
   }));
+
+  // SOL in dollars from Gemini's ticker (cached ~30 s): what the app values devnet SOL balances at.
+  app.get("/prices/sol", async () => ({ usd: await solUsd(), at: Date.now(), source: "Gemini SOL/USD" }));
 
   app.get("/markets", async (req) => {
     const q = z.object({ category: z.string().optional(), search: z.string().optional() }).parse(req.query);
@@ -105,19 +110,46 @@ export async function buildServer() {
   registerPositionRoutes(app, { db, hub, markets });
 
   // Direct-payment mode: the app reports a payment it just sent to PAY_TO; the desk checks it on-chain
-  // and saves it as a position (Record page, position page, simulated hedge).
+  // and saves it as a position, and as a tradable position in the buyer's portfolio (`paperAccount`).
   app.post("/payments", async (req, reply) => {
-    const body = z.object({ signature: z.string().min(64).max(100), forecastHash: z.string().regex(/^[0-9a-f]{64}$/), owner: z.string().min(32).max(64) }).parse(req.body);
+    const body = z
+      .object({
+        signature: z.string().min(64).max(100),
+        forecastHash: z.string().regex(/^[0-9a-f]{64}$/),
+        owner: z.string().min(32).max(64),
+        paperAccount: z.string().regex(/^[A-Za-z0-9-]{8,64}$/).optional(),
+      })
+      .parse(req.body);
     try {
-      return { position: await recordDirectPayment(ctx, body) };
+      return await recordDirectPayment(ctx, body);
     } catch (err) {
       const e = err as Error & { statusCode?: number };
       return reply.status(e.statusCode ?? 500).send({ error: e.message });
     }
   });
-  registerReplayRoutes(app, { db });
-  registerPaperRoutes(app, { db, markets });
+  // Buy more of a position paid for on Solana: the app reports the new payment, the desk checks and adds it.
+  app.post("/payments/add", async (req, reply) => {
+    const body = z
+      .object({
+        signature: z.string().min(64).max(100),
+        forecastHash: z.string().regex(/^[0-9a-f]{64}$/),
+        owner: z.string().min(32).max(64),
+        paperAccount: z.string().regex(/^[A-Za-z0-9-]{8,64}$/),
+        positionId: z.string().uuid(),
+      })
+      .parse(req.body);
+    try {
+      return await recordAddPayment(ctx, body);
+    } catch (err) {
+      const e = err as Error & { statusCode?: number };
+      return reply.status(e.statusCode ?? 500).send({ error: e.message });
+    }
+  });
+  // Sales of positions paid for on Solana are paid out in SOL (see sellForSol).
+  registerPaperRoutes(app, { db, markets, sell: (account, id, fraction, min) => sellForSol(ctx, account, id, fraction, min) });
   registerHookRoutes(app, ctx);
+  // "Ask Grok": market questions answered by xAI's Grok with the desk's live market data (needs XAI_API_KEY).
+  registerChatRoutes(app, { markets });
 
   app.post("/faucet", async (req, reply) => {
     const { owner } = z.object({ owner: z.string().min(32).max(64) }).parse(req.body);
@@ -178,5 +210,8 @@ export async function buildServer() {
 const isMain = !!process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
 if (isMain) {
   const { app } = await buildServer();
+  // A stray rejection must not take the desk down: e.g. a confirmation poll the Solana RPC rate-limits
+  // (429) after its transaction already landed. Log it and keep serving.
+  process.on("unhandledRejection", (err) => app.log.error({ err }, "unhandled rejection (desk kept running)"));
   await app.listen({ port: config.port, host: config.host });
 }

@@ -5,11 +5,8 @@ import { Moon, Sun } from "lucide-react";
 
 type Theme = "light" | "dark";
 
-/**
- * Runs in <head> before the page paints, so it never flashes the wrong theme: a saved choice wins,
- * otherwise the system setting (followed live until the user picks one).
- */
-export const THEME_SCRIPT = `(function(){var d=document.documentElement;try{var m=window.matchMedia("(prefers-color-scheme: dark)");var apply=function(){var s=localStorage.getItem("theme");d.dataset.theme=(s?s==="dark":m.matches)?"dark":"light";};apply();m.addEventListener("change",function(){if(!localStorage.getItem("theme"))apply();});}catch(e){d.dataset.theme="light";}})();`;
+/** Runs in <head> before the page paints. Light mode only for now: the system setting and any saved choice are ignored. */
+export const THEME_SCRIPT = `document.documentElement.dataset.theme="light";`;
 
 /** Light / dark switch for the header. Colors ease across instead of flashing. */
 export function ThemeToggle() {

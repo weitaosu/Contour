@@ -81,6 +81,51 @@ interface PositionRow {
   closed_at: number | null;
   /** 1 for a demo position on a made-up past market (its trades are sample data). */
   demo: number;
+  /** Its Solana transfers (JSON array of SolanaTransfer, oldest first; a lone object is an "open"). */
+  payment_json?: string | null;
+}
+
+/**
+ * One devnet SOL transfer behind a portfolio position: the buyer paying the desk's wallet to open it or
+ * buy more, or the desk's wallet paying the buyer a sale's proceeds.
+ */
+export interface SolanaTransfer {
+  kind: "open" | "add" | "sell";
+  signature: string;
+  from: string;
+  to: string;
+  lamports: string;
+  /** The SOL price the dollars were converted at. */
+  solUsd: number | null;
+  /** The amount in dollars. */
+  usd: number;
+  /** When it was confirmed on-chain (ms). */
+  at: number;
+  cluster: "devnet";
+}
+
+function transfersOf(json: string | null | undefined): SolanaTransfer[] {
+  if (!json) return [];
+  const v = JSON.parse(json) as SolanaTransfer | SolanaTransfer[];
+  return Array.isArray(v) ? v : [{ ...v, kind: v.kind ?? "open" }];
+}
+
+/** Record a Solana transfer on a portfolio position. */
+export function addTransfer(db: DB, positionId: string, t: SolanaTransfer) {
+  const row = db.prepare("SELECT payment_json FROM paper_positions WHERE id = ?").get(positionId) as { payment_json: string | null } | undefined;
+  db.prepare("UPDATE paper_positions SET payment_json = ? WHERE id = ?").run(JSON.stringify([...transfersOf(row?.payment_json), t]), positionId);
+}
+
+/** The wallet that paid for a position on Solana (where its sales are paid), or null for a practice-cash position. */
+export function payerOf(db: DB, account: string, positionId: string): string | null {
+  const t = transfersOf(getRow(db, account, positionId).payment_json);
+  return t.find((x) => x.kind === "open")?.from ?? null;
+}
+
+/** Whether a payment signature is already recorded on any portfolio position (so it can't be used twice). */
+export function transferRecorded(db: DB, signature: string): string | null {
+  const row = db.prepare("SELECT id FROM paper_positions WHERE payment_json LIKE ?").get(`%${signature}%`) as { id: string } | undefined;
+  return row?.id ?? null;
 }
 
 interface LegRow {
@@ -224,9 +269,10 @@ function loadQuote(db: DB, quoteId: string): StoredQuote {
  * than MAX_SLIPPAGE above the price the user reviewed; otherwise the whole order is refused so the
  * user can review it at the new prices. Returns the fills and what they cost.
  */
-async function fillQuote(markets: PaperMarkets, q: StoredQuote) {
+/** `paid`: already paid for on Solana, so fill at today's asks rather than refuse for age or price moves. */
+async function fillQuote(markets: PaperMarkets, q: StoredQuote, paid = false) {
   // Fills use the live asks with price protection (below), so a quote a minute old is still safe to fill.
-  if (Date.now() > q.validUntil + 90_000) throw fail(409, "This quote has expired. Review the trade again for today's prices.");
+  if (!paid && Date.now() > q.validUntil + 90_000) throw fail(409, "This quote has expired. Review the trade again for today's prices.");
   const left = new Date(q.expiryTs * 1000).getTime() - Date.now();
   if (left < CLOSE_BUFFER_MS) throw fail(409, "This market settles in a few minutes, so it's closed for new positions.");
   if (!q.quote.legs.length) throw fail(409, "There's nothing to buy at this view: no contract is worth its price.");
@@ -241,7 +287,7 @@ async function fillQuote(markets: PaperMarkets, q: StoredQuote) {
     const contract = bySym.get(leg.symbol);
     const ask = buyPrice(contract, leg.side);
     if (ask === null) throw fail(409, `"${leg.label}" ${leg.side.toUpperCase()} has no ask right now. Review the trade again.`);
-    if (ask > leg.price + MAX_SLIPPAGE + 1e-9)
+    if (!paid && ask > leg.price + MAX_SLIPPAGE + 1e-9)
       throw fail(409, `Prices moved since your quote ("${leg.label}" ${leg.side.toUpperCase()} is ${Math.round(ask * 100)}¢, was ${Math.round(leg.price * 100)}¢). Review the trade again.`);
     const idx = ladder.instruments[leg.instrumentIndex]?.symbol === leg.symbol ? leg.instrumentIndex : ladder.instruments.findIndex((i) => i.symbol === leg.symbol);
     if (idx < 0) throw fail(409, "The market's contracts changed. Review the trade again.");
@@ -271,15 +317,16 @@ function strategyOf(q: StoredQuote): Strategy {
   return q.preimage.protect ? "protect" : q.preimage.spread ? "spread" : q.preimage.shape === "range" ? "near" : "view";
 }
 
-export async function openPosition(db: DB, markets: PaperMarkets, account: string, quoteId: string, label?: string) {
+/** `opts.paid`: paid for on Solana already, so it fills even if the quote aged or the account's cash is short. */
+export async function openPosition(db: DB, markets: PaperMarkets, account: string, quoteId: string, label?: string, opts: { paid?: boolean } = {}) {
   const q = loadQuote(db, quoteId);
-  const f = await fillQuote(markets, q);
+  const f = await fillQuote(markets, q, !!opts.paid);
   const id = randomUUID();
   const now = Date.now();
   db.transaction(() => {
     const acct = ensureAccount(db, account);
     if (db.prepare("SELECT 1 FROM paper_trades WHERE quote_id = ?").get(quoteId)) throw fail(409, "This quote has already been filled.");
-    if (acct.cash_base < f.payBase) throw fail(402, `Not enough paper cash: this costs $${(f.payBase / 1e6).toFixed(2)} and you have $${(acct.cash_base / 1e6).toFixed(2)}.`);
+    if (!opts.paid && acct.cash_base < f.payBase) throw fail(402, `Not enough paper cash: this costs $${(f.payBase / 1e6).toFixed(2)} and you have $${(acct.cash_base / 1e6).toFixed(2)}.`);
     const request: PaperRequest = {
       belief: q.preimage.belief,
       confidence: q.preimage.confidence,
@@ -300,16 +347,17 @@ export async function openPosition(db: DB, markets: PaperMarkets, account: strin
   return id;
 }
 
-export async function addToPosition(db: DB, markets: PaperMarkets, account: string, positionId: string, quoteId: string) {
+/** `opts.paid`: paid for on Solana already, so it fills even if the quote aged or the account's cash is short. */
+export async function addToPosition(db: DB, markets: PaperMarkets, account: string, positionId: string, quoteId: string, opts: { paid?: boolean } = {}) {
   const pos = getRow(db, account, positionId);
   if (pos.status !== "open") throw fail(409, "This position is closed, so you can't add to it.");
   const q = loadQuote(db, quoteId);
   if (q.ticker !== pos.ticker) throw fail(400, "That quote is for a different market.");
-  const f = await fillQuote(markets, q);
+  const f = await fillQuote(markets, q, !!opts.paid);
   db.transaction(() => {
     const acct = ensureAccount(db, account);
     if (db.prepare("SELECT 1 FROM paper_trades WHERE quote_id = ?").get(quoteId)) throw fail(409, "This quote has already been filled.");
-    if (acct.cash_base < f.payBase) throw fail(402, `Not enough paper cash: this costs $${(f.payBase / 1e6).toFixed(2)} and you have $${(acct.cash_base / 1e6).toFixed(2)}.`);
+    if (!opts.paid && acct.cash_base < f.payBase) throw fail(402, `Not enough paper cash: this costs $${(f.payBase / 1e6).toFixed(2)} and you have $${(acct.cash_base / 1e6).toFixed(2)}.`);
     const get = db.prepare("SELECT * FROM paper_legs WHERE position = ? AND symbol = ? AND side = ?");
     for (const l of f.fills) {
       const have = get.get(positionId, l.symbol, l.side) as LegRow | undefined;
@@ -851,6 +899,8 @@ export async function positionDetail(db: DB, markets: PaperMarkets, account: str
     history: marksOf(db, pos.id),
     trades,
     accountCashUsd: cash,
+    /** Its Solana transfers, oldest first: empty for a practice-cash position. */
+    payments: transfersOf(pos.payment_json),
     canBuyMore: pos.status === "open" && left > CLOSE_BUFFER_MS && pricing === "live",
     canSell: pos.status === "open" && left > 0 && pricing === "live" && legViews.every((l) => l.bid !== null),
   };

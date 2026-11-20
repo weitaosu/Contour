@@ -1,0 +1,230 @@
+/*
+ * The landing page's own look (class names mirrored in styles.ts): an airy white page, regular-weight
+ * display type, small dark pills, and colour kept for the luminous product stage and the art.
+ * It's always light, whatever the app theme. Classes are global and prefixed "lp-" because this
+ * repo's Turbopack config compiles every .css file as plain global CSS (no CSS modules).
+ */
+.lp-root {
+  --lp-ink: #010110;
+  --lp-charcoal: #111117;
+  --lp-muted: #70707d;
+  --lp-body: #2e2e3d;
+  --lp-band: #f8f9fc;
+  --lp-lavender: #eeebff;
+  --lp-violet: #6042f5;
+  --lp-rule: rgba(0, 0, 0, 0.06);
+  /* the shared logo mark paints with the app's violet token */
+  --color-signal-violet: #6042f5;
+  /* globals.css colours every h1–h4 with this token (unlayered, so it beats utilities); keep it ink here in both themes */
+  --color-inkstone: #010110;
+  /* The app's own pieces shown here (charts, tiles) paint with its tokens: pin their light values, so
+     they stay light on this always-light page even when the app is in dark mode. */
+  --color-graphite: #333333;
+  --color-slate: #5d5d5d;
+  --color-smoke: #888888;
+  --color-ash: #b0b0b0;
+  --color-mist: #e7e7e7;
+  --color-cloud: #f6f6f6;
+  --color-porcelain: #ffffff;
+  --color-canvas: #ffffff;
+  --color-gain: #1aab8b;
+  --color-gain-deep: #12846a;
+  --color-loss: #c73e54;
+
+  color-scheme: light;
+  background: #ffffff;
+  color: var(--lp-ink);
+  font-family: var(--font-landing-body), Arial, sans-serif;
+  font-weight: 400;
+}
+
+.lp-display {
+  font-family: var(--font-landing-display), Arial, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.03em;
+}
+
+/* Small pill actions: they stay 36px high beside very large media. */
+.lp-pill {
+  display: inline-flex;
+  flex-shrink: 0;
+  align-items: center;
+  justify-content: center;
+  height: 36px;
+  padding: 0 20px;
+  border-radius: 100px;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background-color 150ms ease, color 150ms ease, border-color 150ms ease, transform 150ms ease;
+}
+.lp-pill:active {
+  transform: scale(0.98);
+}
+.lp-pill:focus-visible {
+  outline: 2px solid var(--lp-violet);
+  outline-offset: 3px;
+}
+.lp-pillDark {
+  background: var(--lp-charcoal);
+  color: #ffffff;
+}
+.lp-pillDark:hover {
+  background: #2b2b36;
+}
+.lp-pillLine {
+  background: #ffffff;
+  color: var(--lp-ink);
+  border: 1px solid var(--lp-ink);
+}
+.lp-pillLine:hover {
+  background: var(--lp-band);
+}
+
+/* Fine film grain, laid over colored fields. */
+.lp-grain::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0.22;
+  mix-blend-mode: soft-light;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* The hero's product stage: lavender lit by broad violet light, with white haze. */
+.lp-stage {
+  position: relative;
+  overflow: hidden;
+  background:
+    radial-gradient(60% 55% at 12% 8%, rgba(96, 66, 245, 0.95) 0%, rgba(96, 66, 245, 0) 70%),
+    radial-gradient(55% 50% at 55% 105%, rgba(96, 66, 245, 0.85) 0%, rgba(96, 66, 245, 0) 70%),
+    radial-gradient(45% 40% at 92% 30%, rgba(190, 167, 240, 0.9) 0%, rgba(190, 167, 240, 0) 70%),
+    linear-gradient(135deg, #8b78f7 0%, #b2a5fa 45%, #d6cffd 100%);
+}
+.lp-haze {
+  position: absolute;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.55);
+  filter: blur(60px);
+  pointer-events: none;
+}
+/* Pale translucent rims around the product shots, instead of heavy shadows. */
+.lp-rim {
+  background: rgba(255, 255, 255, 0.38);
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.6), 0 30px 60px -30px rgba(40, 20, 140, 0.45);
+  -webkit-backdrop-filter: blur(6px);
+  backdrop-filter: blur(6px);
+}
+
+/* The closing band and its faint patterned seams. */
+.lp-band {
+  position: relative;
+  background: var(--lp-band);
+}
+/* How it works sits on its own pale lavender band, a clear break from the white sections around it. */
+.lp-bandLavender {
+  position: relative;
+  background: linear-gradient(180deg, #f4f2ff 0%, #efedff 100%);
+}
+.lp-seam {
+  position: absolute;
+  inset-inline: 0;
+  height: 78px;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20'%3E%3Cpath d='M4 4l3 3M16 4l-3 3M4 16l3-3M16 16l-3-3' stroke='%23010110' stroke-opacity='.13' stroke-width='1' fill='none'/%3E%3C/svg%3E");
+}
+.lp-seamTop {
+  top: 0;
+  -webkit-mask-image: linear-gradient(to bottom, #000, transparent);
+  mask-image: linear-gradient(to bottom, #000, transparent);
+}
+.lp-seamBottom {
+  bottom: 0;
+  -webkit-mask-image: linear-gradient(to top, #000, transparent);
+  mask-image: linear-gradient(to top, #000, transparent);
+}
+
+.lp-link {
+  color: var(--lp-muted);
+  transition: color 120ms ease;
+}
+.lp-link:hover {
+  color: var(--lp-ink);
+}
+
+/* The step selector's rail fills while a step is up, so auto-advance is visible rather than surprising. */
+@keyframes lp-progress {
+  from { transform: scaleY(0); }
+  to { transform: scaleY(1); }
+}
+.lp-progress {
+  animation-name: lp-progress;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+}
+
+/*
+ * App pages in the landing style (the market browser): the same palette, type and controls, applied
+ * over the app's shared pieces (cards, panels, tiles, buttons) without changing them elsewhere.
+ * These rules are unlayered on purpose: they outrank Tailwind's layered utilities, but only inside
+ * .lp-app.
+ */
+.lp-app {
+  --color-cloud: #f8f9fc;
+  --color-mist: #e9ebf1;
+  --color-slate: #70707d;
+  --color-smoke: #8a8a96;
+}
+/* Regular-weight display type for every heading, as on the landing page. */
+.lp-app :is(h1, h2, h3) {
+  font-family: var(--font-landing-display), Arial, sans-serif;
+  font-weight: 400;
+  letter-spacing: -0.02em;
+}
+/* Quieter, squarer surfaces: 12px corners for panels and cards, 8px inside them. */
+.lp-app .rounded-\[24px\] {
+  border-radius: 12px;
+}
+.lp-app .rounded-\[18px\] {
+  border-radius: 8px;
+}
+/* No shouting labels. */
+.lp-app :is(.uppercase, .eyebrow, .stat-label) {
+  text-transform: none;
+  letter-spacing: normal;
+}
+/* Small pills: dark for the main action, outlined for the rest. */
+.lp-app .btn {
+  height: 36px;
+  padding: 0 20px !important;
+  font-size: 14px;
+  font-weight: 500;
+  border-radius: 100px;
+}
+.lp-app .btn-primary {
+  background: var(--lp-charcoal);
+  color: #ffffff;
+}
+.lp-app .btn-primary:hover {
+  background: #2b2b36;
+}
+.lp-app :is(.btn-quiet, .btn-ghost) {
+  background: #ffffff;
+  color: var(--lp-ink);
+  border: 1px solid var(--lp-ink);
+}
+.lp-app :is(.btn-quiet, .btn-ghost):hover {
+  background: var(--lp-band);
+}
+/* Selected chips read like the dark pill, not the app's violet. */
+.lp-app .tag-active {
+  background: var(--lp-charcoal);
+  color: #ffffff;
+}
+/* A chosen option (amount, confidence) is charcoal like the main pill; violet stays for charts and accents. */
+.lp-app :is(button, [role="radio"]).bg-signal-violet {
+  background: var(--lp-charcoal);
+  color: #ffffff;
+}

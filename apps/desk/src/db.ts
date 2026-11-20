@@ -13,6 +13,9 @@ export function openDb(path = process.env.DB_PATH ?? resolve(process.cwd(), "../
   // Direct-payment positions (see recordDirectPayment) name the wallet that was paid.
   const cols = db.prepare("PRAGMA table_info(positions)").all() as { name: string }[];
   if (!cols.some((c) => c.name === "pay_to")) db.exec("ALTER TABLE positions ADD COLUMN pay_to TEXT");
+  // Portfolio positions opened by a Solana payment carry that payment (see recordDirectPayment).
+  const paperCols = db.prepare("PRAGMA table_info(paper_positions)").all() as { name: string }[];
+  if (!paperCols.some((c) => c.name === "payment_json")) db.exec("ALTER TABLE paper_positions ADD COLUMN payment_json TEXT");
   return db;
 }
 

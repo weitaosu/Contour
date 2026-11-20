@@ -20,6 +20,7 @@ import { GeminiPublicClient, type RawEvent } from "@contour/gemini";
 import { randomUUID } from "node:crypto";
 import { config } from "./config";
 import type { DB } from "./db";
+import { lamportsFor, solUsd } from "./solPrice";
 import { loadSamples, loadSnapshot, saveSnapshot } from "./snapshot";
 
 /** How often the desk refreshes its own frozen copy of Gemini's markets while Gemini is up. */
@@ -482,6 +483,9 @@ export interface StoredQuote {
   stakeBaseUnits: string;
   /** The quote's cash, which stays in the owner's wallet. Absent on quotes made before it stopped being escrowed. */
   keptBaseUnits?: string;
+  /** Direct-payment mode: the stake in devnet lamports, at `solUsd` dollars per SOL when quoted. */
+  stakeLamports?: string;
+  solUsd?: number;
   expiryTs: number;
   validUntil: number;
   capturedAt: string;
@@ -571,7 +575,10 @@ export async function makeQuote(markets: MarketService, db: DB, req: QuoteReques
   const expiryTs = Math.floor(new Date(ladder.expiry).getTime() / 1000);
   const now = Date.now();
   const { raw, ...rest } = quote;
+  // Direct-payment mode charges devnet SOL at the current SOL price.
+  const price = config.payTo ? await solUsd() : null;
   const stored: StoredQuote = {
+    ...(price ? { solUsd: price, stakeLamports: String(lamportsFor(escrow.stakeBase, price)) } : {}),
     quoteId,
     ticker: ladder.eventTicker,
     title: ladder.title,

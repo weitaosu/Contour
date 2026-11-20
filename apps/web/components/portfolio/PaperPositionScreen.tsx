@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useState } from "react";
-import { ArrowLeft, CheckCircle2, ExternalLink } from "lucide-react";
+import { ArrowLeft, ArrowUpRight, CheckCircle2, ChevronDown, ExternalLink } from "lucide-react";
 import type { Ladder } from "@contour/core";
 import { ProfitChart } from "@/components/charts/ProfitChart";
 import { OutcomeBars } from "@/components/charts/OutcomeBars";
@@ -11,8 +11,9 @@ import { LiveDot, LivePrice, spotText } from "@/components/forecast/LivePrice";
 import { isWin, ifItLands, runs, whenPhrase } from "@/lib/outcomes";
 import { usePaperPosition, strategyName } from "@/lib/paper";
 import { useLive } from "@/lib/live";
-import { cents, pct, settleLabel, untilLabel, usd } from "@/lib/format";
-import type { PaperContractResult, PaperPositionDetail } from "@/lib/desk";
+import { cents, pct, settleLabel, short, untilLabel, usd } from "@/lib/format";
+import { explorerAddr, explorerTx } from "@/lib/env";
+import type { PaperContractResult, PaperPositionDetail, SolanaTransfer } from "@/lib/desk";
 import { ValueChart } from "./ValueChart";
 import { Activity, pnlPct, signedUsd, tone } from "./PortfolioScreen";
 import { TradeTicket } from "./TradeTicket";
@@ -72,7 +73,9 @@ export function PaperPositionScreen({ id }: { id: string }) {
   const nowMark = spot && d.ladder.kind === "threshold" ? { value: spot.price, label: spot.price >= 1000 ? `$${Math.round(spot.price).toLocaleString("en-US")}` : spotText(spot.price) } : null;
   const nowBucket = nowMark && d.ladder.cuts ? d.ladder.cuts.filter((c) => nowMark.value >= c).length : null;
   const likeliest = d.ladder.marketProb.indexOf(Math.max(...d.ladder.marketProb));
-  const focus = hover ?? nowBucket ?? likeliest;
+  // The live odds can list more outcomes than the position was opened over (Gemini adds strikes), so
+  // keep the highlighted outcome within the position's own.
+  const focus = Math.max(0, Math.min(hover ?? nowBucket ?? likeliest, d.ladder.bucketLabels.length - 1));
   const name = d.ticker.replace(/\d.*$/, "");
   const order = d.ladder.marketProb.map((p, i) => [p, i] as const).sort((a, b) => b[0] - a[0]).map(([, i]) => i);
 
@@ -90,7 +93,7 @@ export function PaperPositionScreen({ id }: { id: string }) {
               {notice === "opened" ? (
                 <>
                   <b>Position opened.</b> {qtyText(d.contracts)} contracts across {d.legs.length} {d.ladder.kind === "threshold" ? (d.legs.length === 1 ? "strike" : "strikes") : d.legs.length === 1 ? "outcome" : "outcomes"} filled at Gemini&apos;s asks
-                  for {usd(d.investedUsd)} of paper cash.
+                  {d.payments[0] ? <>, paid with {solText(d.payments[0])} on Solana.</> : <> for {usd(d.investedUsd)} of paper cash.</>}
                 </>
               ) : (
                 notice
@@ -301,9 +304,70 @@ export function PaperPositionScreen({ id }: { id: string }) {
               refetch();
             }}
           />
+          {d.payments.length > 0 && <OnSolana transfers={d.payments} />}
         </div>
       </div>
     </div>
+  );
+}
+
+const solOf = (t: SolanaTransfer) => Number(t.lamports) / 1e9;
+const sol = (n: number) => `${n.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL`;
+const solText = (t: SolanaTransfer) => sol(solOf(t));
+const KIND = { open: "Bought", add: "Bought more", sell: "Sold" } as const;
+
+/**
+ * This position's Solana transfers: one quiet line (what was paid, and received back from sales), with
+ * each transaction folded underneath, linked to the explorer.
+ */
+function OnSolana({ transfers }: { transfers: SolanaTransfer[] }) {
+  const paid = transfers.filter((t) => t.kind !== "sell").reduce((s, t) => s + solOf(t), 0);
+  const received = transfers.filter((t) => t.kind === "sell").reduce((s, t) => s + solOf(t), 0);
+  const wallet = transfers.find((t) => t.kind === "open")?.from;
+  const contour = transfers.find((t) => t.kind === "open")?.to;
+  const link = (href: string, text: string) => (
+    <a className="link tnum inline-flex items-center gap-0.5 font-mono text-[12px]" href={href} target="_blank" rel="noreferrer">
+      {text} <ArrowUpRight size={12} aria-hidden="true" />
+    </a>
+  );
+  return (
+    <details className="group mt-3 rounded-[20px] bg-cloud px-4 py-3 text-[13.5px]">
+      <summary className="flex cursor-pointer list-none items-center justify-between gap-3 text-slate hover:text-inkstone [&::-webkit-details-marker]:hidden">
+        <span className="flex flex-wrap items-center gap-x-2">
+          <span className="h-1.5 w-1.5 rounded-full bg-gain" aria-hidden="true" />
+          Paid on Solana · <b className="tnum text-inkstone">{sol(paid)}</b>
+          {received > 0 && (
+            <>
+              · received <b className="tnum text-inkstone">{sol(received)}</b>
+            </>
+          )}
+        </span>
+        <ChevronDown size={15} className="shrink-0 transition-transform group-open:rotate-180" aria-hidden="true" />
+      </summary>
+      <ul className="mt-3 flex flex-col gap-2.5 border-t border-mist pt-3">
+        {transfers.map((t) => (
+          <li key={t.signature} className="flex flex-col gap-0.5">
+            <div className="flex items-baseline justify-between gap-3">
+              <span className="text-inkstone">
+                {KIND[t.kind]} <span className="text-smoke">· {new Date(t.at).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })}</span>
+              </span>
+              <b className={`tnum ${t.kind === "sell" ? "text-gain" : "text-inkstone"}`}>
+                {t.kind === "sell" ? "+" : "−"}
+                {solText(t)}
+              </b>
+            </div>
+            <div className="flex items-baseline justify-between gap-3 text-[12.5px] text-smoke">
+              {link(explorerTx(t.signature), short(t.signature, 6))}
+              <span className="tnum">{t.solUsd ? `${usd(t.usd)} at ${usd(t.solUsd)}/SOL` : usd(t.usd)}</span>
+            </div>
+          </li>
+        ))}
+      </ul>
+      <p className="mt-3 flex flex-wrap items-center gap-x-2 gap-y-1 border-t border-mist pt-3 text-[12.5px] text-smoke">
+        {wallet && <>Your wallet {link(explorerAddr(wallet), short(wallet, 4))}</>}
+        {contour && <>· Contour {link(explorerAddr(contour), short(contour, 4))}</>}· Solana devnet
+      </p>
+    </details>
   );
 }
 

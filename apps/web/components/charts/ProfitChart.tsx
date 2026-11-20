@@ -215,7 +215,7 @@ export function ProfitChart({
   const nowX = showNow ? left + (nowU - w0) * step : 0;
   const nowSide: "in" | "left" | "right" = nowX < left ? "left" : nowX > right ? "right" : "in";
   const nowText = showNow ? (nowSide === "left" ? `← Now ${now!.label}` : nowSide === "right" ? `Now ${now!.label} →` : `Now ${now!.label}`) : "";
-  const pillW = textWidth(nowText, 12.5) + 18;
+  const pillW = textWidth(nowText, 11.5) + 8;
   const pillX = Math.min(right - pillW, Math.max(left, (nowSide === "in" ? nowX : nowSide === "left" ? left : right) - pillW / 2));
 
   const pick = (clientX: number, el: SVGSVGElement) => {
@@ -423,18 +423,18 @@ export function ProfitChart({
             </text>
           )}
 
-          {/* now: the live price, a violet line with a pulsing dot on the break-even line */}
+          {/* now: the live price, kept quiet: a thin dashed amber line, a small dot on the break-even line,
+              and a plain amber label under the axis (violet is your curve) */}
           {showNow && (
             <g pointerEvents="none" aria-hidden="true">
               {nowSide === "in" && (
                 <>
-                  <line x1={nowX} x2={nowX} y1={top - 22} y2={yBase + 4} stroke={COLORS.violet} strokeWidth={1.5} />
-                  <circle cx={nowX} cy={y0} r={7} fill={COLORS.violet} className="pulse-ring" />
-                  <circle cx={nowX} cy={y0} r={4.5} fill={COLORS.violet} stroke={COLORS.white} strokeWidth={1.5} />
+                  <line x1={nowX} x2={nowX} y1={top - 22} y2={yBase + 2} stroke={COLORS.live} strokeWidth={1} strokeDasharray="3 3" strokeOpacity={0.7} />
+                  <circle cx={nowX} cy={y0} r={3} fill={COLORS.live} stroke={COLORS.white} strokeWidth={1.25} />
                 </>
               )}
-              <rect x={pillX} y={yBase + 4} width={pillW} height={18} rx={9} fill={COLORS.violet} />
-              <text x={pillX + pillW / 2} y={yBase + 17} textAnchor="middle" fontSize={12.5} fontWeight={700} fill={COLORS.white} className="tnum">
+              <rect x={pillX} y={yBase + 5} width={pillW} height={16} rx={4} fill={COLORS.white} />
+              <text x={pillX + pillW / 2} y={yBase + 17} textAnchor="middle" fontSize={11.5} fontWeight={600} fill={COLORS.live} className="tnum">
                 {nowText}
               </text>
             </g>

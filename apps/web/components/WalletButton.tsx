@@ -8,7 +8,7 @@ import Link from "next/link";
 import { useEffect, useState } from "react";
 import { short, usd } from "@/lib/format";
 import { env, explorerAccountNetwork, explorerAddr, network, networkLabel } from "@/lib/env";
-import { useUsdcBalance, useUsdcMint } from "@/lib/chain";
+import { useDeskConfig, useSolBalance, useSolPrice, useUsdcBalance, useUsdcMint } from "@/lib/chain";
 
 export function useConnectDialog() {
   const [open, setOpen] = useState(false);
@@ -20,6 +20,7 @@ export function WalletDialog({ open, onOpenChange }: { open: boolean; onOpenChan
   const [pending, setPending] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const detected = wallets.filter((w) => w.readyState === WalletReadyState.Installed || w.readyState === WalletReadyState.Loadable);
+  const paysInSol = !!useDeskConfig().data?.payTo;
 
   useEffect(() => {
     if (pending && wallet?.adapter.name === pending && !connecting) {
@@ -53,7 +54,9 @@ export function WalletDialog({ open, onOpenChange }: { open: boolean; onOpenChan
             ) : network === "mainnet" ? (
               "Contour is running on Solana mainnet. Check every amount before you sign."
             ) : (
-              "Contour runs on devnet with test USDC. Switch your wallet to devnet before signing."
+              paysInSol
+                ? "Contour runs on Solana devnet: trades are paid in devnet SOL (free from faucet.solana.com). Switch your wallet to devnet before signing."
+                : "Contour runs on devnet with test USDC. Switch your wallet to devnet before signing."
             )}
           </Dialog.Description>
           <div className="mt-6 flex flex-col gap-3">
@@ -109,11 +112,19 @@ export function WalletButton() {
   );
 }
 
-/** The connected wallet: the full address (copyable), its test USDC, the record, and log out. */
+/**
+ * The connected wallet: the full address (copyable), its balance, the portfolio, and log out. In
+ * direct-payment mode trades are paid in devnet SOL, so the balance is the wallet's SOL valued at
+ * SOL's live price; otherwise it's the wallet's test USDC.
+ */
 function WalletMenu({ address }: { address: string }) {
   const { wallet, publicKey, disconnect } = useWallet();
+  const paysInSol = !!useDeskConfig().data?.payTo;
   const mint = useUsdcMint();
-  const bal = useUsdcBalance(publicKey, mint);
+  const usdcBal = useUsdcBalance(paysInSol ? null : publicKey, mint);
+  const solBal = useSolBalance(paysInSol ? publicKey : null);
+  const price = useSolPrice();
+  const solUsd = paysInSol && solBal.data !== undefined && price.data ? solBal.data * price.data.usd : null;
   const [open, setOpen] = useState(false);
   const [copied, setCopied] = useState(false);
   const copy = async () => {
@@ -162,14 +173,27 @@ function WalletMenu({ address }: { address: string }) {
             </button>
           </div>
 
-          <div className="mt-3 flex items-center justify-between text-[14px]">
-            <span className="text-slate">Test USDC</span>
-            <span className="tnum font-bold text-inkstone">{bal.data !== undefined ? usd(bal.data) : "…"}</span>
-          </div>
+          {paysInSol ? (
+            <div className="mt-3 flex items-start justify-between gap-3 text-[14px]">
+              <span className="text-slate">Balance</span>
+              <span className="text-right">
+                <span className="tnum block font-bold text-inkstone">{solUsd !== null ? usd(solUsd) : "…"}</span>
+                <span className="tnum block text-[12.5px] text-smoke">
+                  {solBal.data !== undefined ? `${solBal.data.toLocaleString("en-US", { maximumFractionDigits: 4 })} SOL` : "…"}
+                  {price.data ? ` · ${usd(price.data.usd)}/SOL` : ""}
+                </span>
+              </span>
+            </div>
+          ) : (
+            <div className="mt-3 flex items-center justify-between text-[14px]">
+              <span className="text-slate">Test USDC</span>
+              <span className="tnum font-bold text-inkstone">{usdcBal.data !== undefined ? usd(usdcBal.data) : "…"}</span>
+            </div>
+          )}
 
           <div className="mt-4 flex flex-col gap-1 border-t border-mist pt-3 text-[14px]">
             <Link href="/me" onClick={() => setOpen(false)} className="flex items-center justify-between rounded-[12px] px-2 py-2 font-medium text-inkstone hover:bg-cloud">
-              My record <ChevronRight size={16} className="text-smoke" />
+              My portfolio <ChevronRight size={16} className="text-smoke" />
             </Link>
             <a
               href={explorerAddr(address)}
