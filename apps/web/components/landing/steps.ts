@@ -17,7 +17,7 @@ export const STEPS = [
   },
   {
     title: "See what you make",
-    short: "the most you can make and lose, and your odds",
+    short: "the most you can make and lose",
     body: "Understand the most you can make and lose, your chance of profit, and the contracts you’d buy at Gemini’s prices.",
   },
   {
