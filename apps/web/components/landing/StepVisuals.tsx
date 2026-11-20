@@ -12,6 +12,7 @@ import { oneIn, Tile } from "@/components/forecast/ProfitCard";
 import { AnimatedNumber } from "@/components/ui/AnimatedNumber";
 import { pct, usd, usd0 } from "@/lib/format";
 import { isWin, runs, whenPhrase } from "@/lib/outcomes";
+import { pickFeatured } from "@/lib/featured";
 
 /**
  * The visuals beside each "How it works" step, built from the app's own pieces and math: the
@@ -30,13 +31,6 @@ const VIEWS = [
 const BULLISH = 1;
 const STAKE = 100;
 const EXAMPLE = exampleLadder.ladder as unknown as Ladder;
-
-function pickFeatured(ms: MarketSummary[]): MarketSummary | undefined {
-  const dayAhead = Date.now() + 24 * 3600_000;
-  const sol = ms.filter((m) => m.kind === "threshold" && m.ticker.startsWith("SOL") && new Date(m.expiry).getTime() > dayAhead);
-  sol.sort((a, b) => a.expiry.localeCompare(b.expiry));
-  return sol[0] ?? ms.find((m) => m.kind === "threshold");
-}
 
 const useMarkets = () => useQuery({ queryKey: ["markets"], queryFn: desk.markets, staleTime: 60_000, retry: 1 });
 
