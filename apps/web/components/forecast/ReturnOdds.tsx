@@ -18,7 +18,7 @@ import { usd } from "@/lib/format";
  *   back (a quantile dotplot), so "lose some" shows how much is kept, not just that it's a loss.
  * - A probability-of-return distribution, the view brokers put behind their P&L charts.
  * Everything is on the full stake for both bets, in dollars, so they compare like for like, and by
- * the market's odds. Opened, it holds two things: the profit or loss in every outcome, then the dots.
+ * the market's odds. It leads with the profit or loss in every outcome; the dots are a tap away.
  */
 
 type Q = Omit<Quote, "raw">;
@@ -43,8 +43,6 @@ const money = (x: number) => {
   const s = a >= 10 || Math.abs(a - Math.round(a)) < 0.005 ? Math.round(a).toLocaleString("en-US") : a.toFixed(2);
   return `${x < -0.004 ? "−" : ""}$${s}`;
 };
-/** "+$178", "−$75": a result against the stake. */
-const signed = (x: number) => (x > 0.004 ? `+${money(x)}` : money(x));
 /** For sentences: rounding cash left over from a lost contract reads as nothing, not "$0.01". */
 const left = (x: number) => (x < 0.5 ? "nothing" : money(x));
 const leftShort = (x: number) => (x < 0.5 ? "$0" : money(x));
@@ -85,8 +83,6 @@ interface Profile {
   /** Chance of each return bin. */
   bins: number[];
   best: number;
-  /** The least it brings back, in any outcome. */
-  worst: number;
   /** Range of results with a real chance (≥ 1 in 200), and how many distinct ones there are. */
   low: number;
   high: number;
@@ -131,7 +127,6 @@ function profile(payout: number[], stake: number, probs: number[]): Profile {
     lossKeep: lossChance > 0.0005 ? lossMoney / lossChance : null,
     bins,
     best: Math.max(...payout),
-    worst: Math.min(...payout),
     low: real.length ? Math.min(...real) : Math.min(...payout),
     high: real.length ? Math.max(...real) : Math.max(...payout),
     distinct: rounded.size,
@@ -181,10 +176,11 @@ function useComparison(ladder: Ladder, quote: Q) {
 }
 
 /**
- * The comparison's one-line takeaway, as its own row (under the charts): how often this position
- * makes money against one contract, and what it leaves you when it goes wrong.
+ * Under the charts: what each position makes or loses at settlement, with the comparison's takeaway as
+ * its subtitle, then (on its own toggle) out of 100 bets like this. All by the market's odds, and
+ * always against putting the whole stake on the single best contract.
  */
-export function ReturnVerdict({
+export function ReturnOdds({
   ladder,
   quote,
   sizedDown = null,
@@ -193,39 +189,15 @@ export function ReturnVerdict({
 }: {
   ladder: Ladder;
   quote: Q;
+  /** Set when the money put in has little to no spread: one bet with cash held back, which isn't a hedge. */
   sizedDown?: Spread | null;
+  /** While the numbers are being re-quoted. */
   faded?: boolean;
   className?: string;
 }) {
-  const { stake, data } = useComparison(ladder, quote);
-  return (
-    <section aria-label="Compared with one contract" className={`min-w-0 rounded-[24px] bg-cloud px-4 py-3.5 transition-opacity duration-300 ${faded ? "opacity-45" : ""} ${className}`}>
-      <p className="text-[12px] font-bold uppercase tracking-[0.075em] text-slate">Compared with one contract</p>
-      <p className="mt-1 text-[17px] font-bold leading-snug text-inkstone">
-        {data ? (sizedDown ? sizedVerdict(sizedDown) : verdict(data.hedge, data.single, stake)) : "Your position against putting everything on one contract."}
-      </p>
-    </section>
-  );
-}
-
-export function ReturnOdds({
-  ladder,
-  quote,
-  sizedDown = null,
-  className = "",
-  bodyClassName = "",
-}: {
-  ladder: Ladder;
-  quote: Q;
-  /** Set when the money put in has little to no spread: one bet with cash held back, which isn't a hedge. */
-  sizedDown?: Spread | null;
-  className?: string;
-  /** For the details panel (toggle and, when open, the table and dots): its own grid item, so the parent can give it the full width. */
-  bodyClassName?: string;
-}) {
   const [open, setOpen] = useState(false);
   const [focus, setFocus] = useState<Cls | null>(null);
-  const bodyId = useId();
+  const dotsId = useId();
   // Always the market's odds: what the prices say, not the user's own forecast.
   const { stake, probs, data } = useComparison(ladder, quote);
 
@@ -233,72 +205,41 @@ export function ReturnOdds({
   const oneName = c ? `All on ${c.side.toUpperCase()} “${c.label}”` : "One contract";
   // Only a spread position is called a hedge; one contract with cash held back is just a smaller bet.
   const mine = sizedDown ? "Your bet" : "This hedge";
-  const keep = (p: Profile) => (p.lossKeep === null ? "never loses" : leftShort(p.lossKeep));
-  // Two grid items: the comparison card (beside the contracts), and the details panel below it with
-  // its own toggle, which the parent can span across the full width.
   return (
-    <>
-      <section aria-label="Chance of each result" className={`flex min-w-0 flex-col gap-3 rounded-[24px] bg-cloud p-4 ${className}`}>
-          <h3 className="text-[12px] font-bold uppercase tracking-[0.075em] text-slate">How likely is each result?</h3>
-          {data ? (
-            <span className="tnum grid w-full grid-cols-[minmax(0,1fr)_auto_auto] items-baseline gap-x-5 gap-y-1.5 text-[13.5px] text-slate">
-              <span />
-              <span className="text-right text-[11.5px] font-bold uppercase tracking-[0.075em] text-signal-violet">Yours</span>
-              <span className="text-right text-[11.5px] font-bold uppercase tracking-[0.075em] text-smoke">One contract</span>
-              <span>Make money</span>
-              <b className="text-right text-inkstone">{data.hedge.counts.win} in 100</b>
-              <b className="text-right text-inkstone">{data.single.counts.win} in 100</b>
-              <span>Lose it all</span>
-              <b className="text-right text-inkstone">{data.hedge.counts.all} in 100</b>
-              <b className="text-right text-inkstone">{data.single.counts.all} in 100</b>
-              {/* then the dollars: the best and worst it can do, and what's left when it goes wrong */}
-              <span className="mt-1.5 border-t border-mist pt-2">Most you can make</span>
-              <b className="mt-1.5 border-t border-mist pt-2 text-right text-gain">{signed(data.hedge.best - stake)}</b>
-              <b className="mt-1.5 border-t border-mist pt-2 text-right text-gain">{signed(data.single.best - stake)}</b>
-              <span>Most you can lose</span>
-              <b className="text-right text-inkstone">{signed(data.hedge.worst - stake)}</b>
-              <b className="text-right text-inkstone">{signed(data.single.worst - stake)}</b>
-              <span>Keep when it goes wrong</span>
-              <b className="text-right text-inkstone">{keep(data.hedge)}</b>
-              <b className="text-right text-inkstone">{keep(data.single)}</b>
-            </span>
-          ) : (
-            <span className="text-[13.5px] text-slate">Your position against putting everything on one contract.</span>
-          )}
-      </section>
+    <section aria-labelledby={`${dotsId}-title`} className={`min-w-0 rounded-[24px] bg-cloud p-4 transition-opacity duration-300 ${faded ? "opacity-45" : ""} ${className}`}>
+      <h2 id={`${dotsId}-title`} className="text-[16px] font-bold leading-tight text-inkstone">
+        Profit or loss at settlement
+      </h2>
+      <p className="mt-1 text-[15px] font-medium leading-snug text-inkstone">
+        {data ? (sizedDown ? sizedVerdict(sizedDown) : verdict(data.hedge, data.single, stake)) : "Your position against putting everything on one contract."}
+      </p>
 
-      <section aria-label="Profit or loss and odds of each result" className={`min-w-0 rounded-[24px] bg-cloud ${bodyClassName}`}>
-        <button
-          type="button"
-          aria-expanded={open}
-          aria-controls={bodyId}
-          onClick={() => setOpen((o) => !o)}
-          className="ease flex w-full items-center justify-between gap-4 rounded-[24px] px-4 py-3.5 text-left hover:bg-mist/40"
-        >
-          <span className="min-w-0">
-            <span className="block text-[15px] font-bold leading-snug text-inkstone">Profit or loss at settlement</span>
-            <span className="block text-[13px] text-slate">Every final outcome, and out of 100 bets like this, against one contract</span>
-          </span>
-          <span className="flex shrink-0 items-center gap-1.5 text-[13.5px] font-bold text-signal-violet">
-            {open ? "Hide" : "Show"}
-            <ChevronDown size={18} strokeWidth={2.25} aria-hidden="true" className={`ease ${open ? "rotate-180" : ""}`} />
-          </span>
-        </button>
-      {open && (
-        <div id={bodyId} className="grid grid-cols-[minmax(0,1fr)] gap-7 border-t border-mist px-4 pb-4 pt-4">
-          {!data || !c ? (
-            <p className="text-[13.5px] text-slate">Once you have a trade, this shows how likely each result is next to the single best contract.</p>
-          ) : (
-            <>
-              <div>
-                <p className="text-[13px] text-slate">What each position would make or lose in every final outcome, and how likely each is by the market&apos;s odds.</p>
-                <div className="mt-2.5 rounded-[18px] bg-porcelain p-3">
-                  <ScenarioTable ladder={ladder} quote={quote} stake={stake} probs={probs} oddsBasis="the market's odds" />
-                </div>
-              </div>
+      {!data || !c ? (
+        <p className="mt-3 text-[13.5px] text-slate">Once you have a trade, this shows what it and the single best contract would make or lose in every outcome.</p>
+      ) : (
+        <>
+          <div className="mt-3 rounded-[18px] bg-porcelain p-3">
+            <ScenarioTable ladder={ladder} quote={quote} stake={stake} probs={probs} />
+          </div>
 
-              <div>
-                <Heading title="Out of 100 bets like this" hint="Each dot is one bet by the market's odds, filled by the money it brings back. Point at a group to pick it out in both." />
+          {/* The dots: the same comparison as 100 bets, a tap away */}
+          <div className="mt-3 border-t border-mist pt-2">
+            <button
+              type="button"
+              aria-expanded={open}
+              aria-controls={dotsId}
+              onClick={() => setOpen((o) => !o)}
+              className="ease -mx-2 flex w-[calc(100%+1rem)] items-center justify-between gap-3 rounded-[14px] px-2 py-2 text-left hover:bg-mist/40"
+            >
+              <span className="text-[14px] font-bold text-inkstone">Out of 100 bets like this</span>
+              <span className="flex items-center gap-1.5 text-[13.5px] font-bold text-signal-violet">
+                {open ? "Hide" : "Show"}
+                <ChevronDown size={18} strokeWidth={2.25} aria-hidden="true" className={`ease ${open ? "rotate-180" : ""}`} />
+              </span>
+            </button>
+            {open && (
+              <div id={dotsId} className="pt-2">
+                <p className="text-[13px] text-slate">Each dot is one bet by the market&apos;s odds, filled by the money it brings back. Point at a group to pick it out in both.</p>
                 <Takeaway>
                   {sizedDown ? <SizedTakeaway s={sizedDown} /> : <DotTakeaway stake={stake} hedge={data.hedge} single={data.single} />}
                 </Takeaway>
@@ -315,21 +256,11 @@ export function ReturnOdds({
                   ))}
                 </ul>
               </div>
-            </>
-          )}
-        </div>
+            )}
+          </div>
+        </>
       )}
-      </section>
-    </>
-  );
-}
-
-function Heading({ title, hint }: { title: string; hint?: string }) {
-  return (
-    <>
-      <h3 className="text-[14px] font-bold text-inkstone">{title}</h3>
-      {hint && <p className="mt-0.5 text-[13px] text-slate">{hint}</p>}
-    </>
+    </section>
   );
 }
 

@@ -6,8 +6,8 @@ import { formatValue, paysIn, type Ladder, type Quote } from "@contour/core";
  * - Contour P&L: what all its YES/NO contracts pay in that outcome, plus the budget it didn't
  *   spend, minus the whole budget. Fees are already in it (they came out of the budget).
  * - Single contract P&L: the quote's benchmark contract (the best single contract for the same
- *   forecast), bought with the whole budget, as in the "How likely is each result?" comparison, so
- *   the two always agree. Winning contracts pay $1, losing ones $0, less the purchase cost and fee
+ *   forecast), bought with the whole budget, as the takeaway line above the table assumes, so the
+ *   two always agree. Winning contracts pay $1, losing ones $0, less the purchase cost and fee
  *   (any budget it can't spend comes back either way).
  * - Difference: Contour minus single. Positive means Contour does better there.
  *

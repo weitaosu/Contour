@@ -1,48 +1,64 @@
 "use client";
 
-import { memo } from "react";
+import { memo, useState } from "react";
 import type { Quote } from "@contour/core";
 import { cents, notableUnused, qty, usd } from "@/lib/format";
 
 /** The contracts behind a position (and the part of the amount it doesn't need), with where the prices come from. */
-export const LegsTable = memo(function LegsTable({ quote, paper, crossed, compact = false }: { quote: Omit<Quote, "raw">; paper: boolean; crossed: string[]; compact?: boolean }) {
+export const LegsTable = memo(function LegsTable({
+  quote,
+  paper,
+  crossed,
+  compact = false,
+  limit,
+}: {
+  quote: Omit<Quote, "raw">;
+  paper: boolean;
+  crossed: string[];
+  compact?: boolean;
+  /** Compact only: show this many contracts and a toggle for the rest, so a long list stays short. */
+  limit?: number;
+}) {
+  const [all, setAll] = useState(false);
   if (compact) {
     const total = quote.legs.reduce((a, l) => a + l.usd, 0) + quote.feesUsd;
+    // One hidden row isn't worth a toggle: only collapse when it hides two or more (or all of them, at 0).
+    const collapsible = limit !== undefined && (limit === 0 ? quote.legs.length > 0 : quote.legs.length > limit + 1);
+    const legs = collapsible && !all ? quote.legs.slice(0, limit) : quote.legs;
+    // A narrow list, not a table: each contract's cost on its own line with the name, the size and
+    // price quietly underneath, so nothing has to share a column in a slim panel.
     return (
-      <div>
-        <table className="w-full text-[13px] leading-[19px]" title={crossed.length ? `Crossed quotes skipped: ${crossed.join(", ")}` : undefined}>
-          <thead>
-            <tr className="text-left text-[12.5px] text-smoke">
-              <th className="pb-1 font-medium">Contract</th>
-              <th className="pb-1 text-right font-medium">Qty × price</th>
-              <th className="pb-1 text-right font-medium">Cost</th>
-            </tr>
-          </thead>
-          <tbody className="text-inkstone">
-            {quote.legs.map((l) => (
-              <tr key={`${l.symbol}-${l.side}`} className="border-t border-mist">
-                <td className="py-[2px]">
-                  <span className="mr-1.5 rounded-full bg-mist px-1.5 py-px text-[11px] font-bold">{l.side.toUpperCase()}</span>
-                  {l.label}
-                </td>
-                <td className="tnum py-[2px] text-right text-slate">
-                  {qty(l.qty)} × {cents(l.price)}
-                </td>
-                <td className="tnum py-[2px] text-right">{usd(l.usd)}</td>
-              </tr>
-            ))}
-            <tr className="border-t border-mist">
-              <td className="py-[2px]" colSpan={2}>
-                <b>You pay</b>{" "}
-                <span className="text-slate">
-                  incl. {usd(quote.feesUsd)} fees{notableUnused(quote.cashUsd) ? <> · {usd(quote.cashUsd)} not needed</> : null}
+      <div title={crossed.length ? `Crossed quotes skipped: ${crossed.join(", ")}` : undefined}>
+        {legs.length > 0 && (
+        <ul className="divide-y divide-mist border-y border-mist">
+          {legs.map((l) => (
+            <li key={`${l.symbol}-${l.side}`} className="flex items-start justify-between gap-3 py-1.5">
+              <span className="min-w-0">
+                <span className="flex items-center gap-1.5 text-[13.5px] leading-snug text-inkstone">
+                  <span className="shrink-0 rounded-full bg-mist px-1.5 py-px text-[10.5px] font-bold">{l.side.toUpperCase()}</span>
+                  <span className="truncate">{l.label}</span>
                 </span>
-              </td>
-              <td className="tnum py-[2px] text-right font-bold">{usd(total)}</td>
-            </tr>
-          </tbody>
-        </table>
-
+                <span className="tnum block text-[12px] text-smoke">
+                  {qty(l.qty)} contracts at {cents(l.price)}
+                </span>
+              </span>
+              <span className="tnum shrink-0 text-[13.5px] font-bold leading-snug text-inkstone">{usd(l.usd)}</span>
+            </li>
+          ))}
+        </ul>
+        )}
+        {collapsible && (
+          <button type="button" aria-expanded={all} onClick={() => setAll((a) => !a)} className="mt-1.5 text-[12.5px] font-bold text-signal-violet hover:underline">
+            {all ? "Show fewer" : `Show all ${quote.legs.length} contracts`}
+          </button>
+        )}
+        <div className="mt-2 flex items-baseline justify-between gap-3">
+          <b className="text-[14px] text-inkstone">You pay</b>
+          <b className="tnum text-[15px] text-inkstone">{usd(total)}</b>
+        </div>
+        <p className="text-[12px] text-smoke">
+          Includes {usd(quote.feesUsd)} in fees{notableUnused(quote.cashUsd) ? <> · {usd(quote.cashUsd)} of your budget isn&apos;t needed</> : null}
+        </p>
       </div>
     );
   }

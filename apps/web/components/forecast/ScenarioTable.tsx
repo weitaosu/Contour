@@ -1,6 +1,6 @@
 import { memo } from "react";
 import type { Ladder, Quote } from "@contour/core";
-import { cents, usd } from "@/lib/format";
+import { usd } from "@/lib/format";
 import { protectionTable, scenarioTable, type ScenarioRow } from "@/lib/scenarios";
 
 type Q = Omit<Quote, "raw">;
@@ -102,40 +102,16 @@ export const ScenarioTable = memo(function ScenarioTable({
   quote,
   stake,
   probs,
-  oddsBasis,
 }: {
   ladder: Ladder;
   quote: Q;
   stake: number;
   /** Chance of each outcome, for the Chance column (omitted: no column). */
   probs?: number[];
-  /** Whose odds those are, for the footnote: "your forecast" or "the market's prices". */
-  oddsBasis?: string;
 }) {
   const t = scenarioTable(ladder, quote, stake);
   if (!t) return <p className="text-[13.5px] text-slate">Once you have a trade, this shows what it and the single best contract would make or lose in every outcome.</p>;
-  const b = t.benchmark;
-  return (
-    <div>
-      <p className="text-[13.5px] leading-snug text-inkstone">
-        One contract:{" "}
-        <b>
-          {b.side.toUpperCase()} &ldquo;{b.label}&rdquo;
-        </b>{" "}
-        at {cents(b.price)}, {b.qty.toLocaleString("en-US", { maximumFractionDigits: 2 })} contracts for <b className="tnum">{usd(b.cost)}</b> with fees: your whole{" "}
-        {usd(stake)} on it, as in the comparison above.
-      </p>
-      <div className="mt-2">
-        <Rows rows={t.rows} heads={["One contract", "Contour", "Difference"]} probs={probs} />
-      </div>
-      <p className="mt-2 text-[12.5px] leading-snug text-smoke">
-        {probs
-          ? `Dollar results if it settles there. Chance is by ${oddsBasis ?? "the market's odds"}. `
-          : "Dollar results if it settles there, not how likely each one is. "}
-        Difference is Contour minus one contract: positive means Contour does better.
-      </p>
-    </div>
-  );
+  return <Rows rows={t.rows} heads={["One contract", "Contour", "Difference"]} probs={probs} />;
 });
 
 /** Protection mode: the holding alone vs the holding plus the strategy, at each range's midpoint. */
