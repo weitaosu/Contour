@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction, type ParsedInstruction } from "@solana/web3.js";
+import { Connection, PublicKey, SystemProgram, Transaction, sendAndConfirmTransaction, type ParsedInstruction } from "@solana/web3.js";
 import { ata } from "@contour/chain";
 import { config } from "./config";
 import { loadQuoteByHash, type StoredQuote } from "./markets";
@@ -9,31 +9,36 @@ import { hedgeLegs, setPosition, type HandlerCtx } from "./handler";
 
 /**
  * Demo direct-payment mode: buyers pay devnet SOL (or, for older quotes, test USDC) straight to the
- * desk's one wallet, `config.payTo`, and the desk pays sale proceeds back from it. Every transfer is
- * checked on-chain and recorded on the buyer's portfolio position.
+ * receiving wallet, `config.payTo`, and the desk's own wallet (its keypair) pays sale proceeds back.
+ * Every transfer is checked on-chain and recorded on the buyer's portfolio position. Receiving needs
+ * only an RPC connection, so a desk without its keypair still takes payments (it just can't pay out).
  */
 
 const fail = (msg: string, statusCode = 400) => Object.assign(new Error(msg), { statusCode });
 
-function ready(ctx: HandlerCtx) {
+let readOnly: Connection | null = null;
+/** The chain connection: the desk's own when it has its keys, otherwise a plain read-only one. */
+function ready(ctx: HandlerCtx): Connection {
   if (!config.payTo) throw fail("Direct payments are not enabled on this desk.", 404);
-  if (!ctx.chain) throw fail("Desk chain access is not configured.", 503);
-  return ctx.chain;
+  if (ctx.chain) return ctx.chain.connection;
+  return (readOnly ??= new Connection(config.solanaRpcUrl, "confirmed"));
 }
 
-/** Check a payment on-chain against its quote: exactly the quoted amount, from `owner` to the desk's wallet, within a minute of the quote. Returns when it landed (ms). */
+/** Check a payment on-chain against its quote: exactly the quoted amount, from `owner` to the receiving wallet, within a minute of the quote. Returns when it landed (ms). */
 async function confirmPayment(ctx: HandlerCtx, signature: string, owner: string, quote: StoredQuote & { createdAt: number }): Promise<number> {
-  const chain = ready(ctx);
+  const connection = ready(ctx);
   // The transfer must be confirmed: retry briefly while it lands.
   let tx = null;
   for (let i = 0; i < 10 && !tx; i++) {
-    tx = await chain.connection.getParsedTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
+    tx = await connection.getParsedTransaction(signature, { commitment: "confirmed", maxSupportedTransactionVersion: 0 });
     if (!tx) await new Promise((r) => setTimeout(r, 800));
   }
   if (!tx) throw fail("The payment transaction wasn't found on-chain.", 404);
   if (tx.meta?.err) throw fail("The payment transaction failed on-chain.");
-  const mint = chain.usdcMint.toBase58();
-  const dest = ata(chain.usdcMint, new PublicKey(config.payTo)).toBase58();
+  // Older quotes were paid in test USDC to the receiving wallet's token account.
+  const usdcMint = config.usdcMint ? new PublicKey(config.usdcMint) : null;
+  const mint = usdcMint?.toBase58() ?? "";
+  const dest = usdcMint ? ata(usdcMint, new PublicKey(config.payTo)).toBase58() : "";
   const paid = tx.transaction.message.instructions.some((ix) => {
     const p = (ix as ParsedInstruction).parsed as { type?: string; info?: Record<string, unknown> } | undefined;
     const info = p?.info;

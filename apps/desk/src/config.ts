@@ -29,5 +29,7 @@ export const config = {
    * Demo direct-payment mode: when set, the app sends the buyer's USDC straight to this wallet when
    * they pay, instead of opening an escrow. Unset = the escrow flow.
    */
-  payTo: process.env.PAY_TO ?? "",
+  // Demo default: the team's devnet wallet receives every payment. Set PAY_TO to override, or to an
+  // empty value for the escrow flow.
+  payTo: process.env.PAY_TO ?? "3nhsSAEBwnA3ch95U1vmuJJ6h32Fbf2uFjfSgWrNRfDm",
 };
