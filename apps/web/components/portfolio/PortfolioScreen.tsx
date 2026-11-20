@@ -269,7 +269,7 @@ function Empty({ tab }: { tab: Tab }) {
           : "When a position's market settles, it moves here with what it paid out."}
       </p>
       {tab === "open" && (
-        <Link href="/" className="btn btn-primary">
+        <Link href="/markets" className="btn btn-primary">
           Browse markets
         </Link>
       )}
@@ -343,7 +343,7 @@ function ConnectPrompt({ embedded }: { embedded: boolean }) {
         <button type="button" className="btn btn-primary !gap-1.5" onClick={() => setDialog(true)}>
           <Wallet size={16} strokeWidth={2.25} /> Connect wallet
         </button>
-        <Link href="/" className="btn btn-quiet">
+        <Link href="/markets" className="btn btn-quiet">
           Browse markets
         </Link>
       </div>

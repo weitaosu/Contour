@@ -42,7 +42,7 @@ export function TradeTicket({ account, position: d, onDone }: { account: string;
           <dd className={`tnum text-right font-bold ${tone(d.realizedUsd)}`}>{signedUsd(d.realizedUsd)}</dd>
         </dl>
         {d.demo ? (
-          <a href="/" className="btn btn-primary btn-block">
+          <a href="/markets" className="btn btn-primary btn-block">
             Browse live markets
           </a>
         ) : (

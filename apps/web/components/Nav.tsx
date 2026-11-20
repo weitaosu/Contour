@@ -11,13 +11,18 @@ import { ThemeToggle } from "./ThemeToggle";
 import { desk } from "@/lib/desk";
 
 const links = [
-  { href: "/", label: "Markets", icon: LayoutGrid, hint: "Every market you can trade as one curve" },
+  { href: "/markets", label: "Markets", icon: LayoutGrid, hint: "Every market you can trade as one curve" },
   { href: "/me", label: "Portfolio", icon: Briefcase, hint: "Your wallet's positions, valued live" },
 ];
 
-// Position pages (/p/<pubkey>, and paper ones at /portfolio/<id>) live under the Portfolio tab.
+// Market pages (/m/<ticker>) live under Markets; position pages (/p/<pubkey>, and paper ones at
+// /portfolio/<id>) under Portfolio. The landing page (/) belongs to no tab.
 const isActive = (href: string, path: string) =>
-  href === "/" ? path === "/" || path.startsWith("/m/") : href === "/me" ? path.startsWith("/me") || path.startsWith("/portfolio") || path.startsWith("/p/") : path.startsWith(href);
+  href === "/markets"
+    ? path.startsWith("/markets") || path.startsWith("/m/")
+    : href === "/me"
+      ? path.startsWith("/me") || path.startsWith("/portfolio") || path.startsWith("/p/")
+      : path.startsWith(href);
 
 /**
  * The pages as one segmented control, like the pickers inside the app: a grey track, the
@@ -55,8 +60,10 @@ export function Nav() {
   const path = usePathname();
   const cfg = useQuery({ queryKey: ["config"], queryFn: desk.config, staleTime: 60_000 });
   const mode = cfg.data?.executionMode ?? "paper";
-  // The front page and market pages are full-width workspaces; the bar lines up with them there.
-  const wide = path === "/" || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/portfolio") || path.startsWith("/p/");
+  // The landing page brings its own navigation.
+  if (path === "/") return null;
+  // The market browser and market pages are full-width workspaces; the bar lines up with them there.
+  const wide = path.startsWith("/markets") || path.startsWith("/m/") || path.startsWith("/me") || path.startsWith("/portfolio") || path.startsWith("/p/");
   return (
     // Named, so page transitions leave it in place: the content moves, the bar stays.
     <header className="sticky top-0 z-30 border-b border-mist bg-canvas/90 backdrop-blur-md" style={{ viewTransitionName: "site-header" }}>

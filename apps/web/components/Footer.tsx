@@ -1,14 +1,18 @@
 "use client";
 
 import { useQuery } from "@tanstack/react-query";
+import { usePathname } from "next/navigation";
 import { LogoMark } from "./Logo";
 import { desk } from "@/lib/desk";
 import { env, explorerAddr } from "@/lib/env";
 import { short } from "@/lib/format";
 
 export function Footer() {
+  const path = usePathname();
   const cfg = useQuery({ queryKey: ["config"], queryFn: desk.config, staleTime: 60_000 });
   const programId = cfg.data?.programId ?? env.programId;
+  // The landing page ends with its own footer.
+  if (path === "/") return null;
   return (
     <footer className="on-night mt-24 bg-night text-porcelain">
       <div className="page grid gap-10 py-16 md:grid-cols-[1.4fr_1fr_1fr]">
